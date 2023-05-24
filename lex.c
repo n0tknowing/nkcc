@@ -669,15 +669,18 @@ static void lexer_scan_string(lexer_t *lex, bool is_wide)
     lexer_next_char(lex);
 }
 
-static void lexer_scan_char(lexer_t *lex)
+static void lexer_scan_char(lexer_t *lex, bool is_wide)
 {
     lex->token.line = lex->line;
     lex->token.col = lex->col;
 
     lexer_next_char(lex);
 
+    if (is_wide)
+        lexer_next_char(lex);
+
     if (lex->cur[0] == '\'') {
-        errf(lex, "Empty character constant");
+        errf(lex, "Empty %scharacter constant", is_wide ? "wide " : "");
         exit(1);
     }
 
@@ -729,7 +732,7 @@ static void lexer_scan_char(lexer_t *lex)
     }
 
     lex->token.len = lexer_count_length(lex);
-    lex->token.type = tok_char_const;
+    lex->token.type = is_wide ? tok_wide_char_const : tok_char_const;
     lexer_next_char(lex);
 }
 
@@ -753,6 +756,8 @@ void lexer_scan(lexer_t *lex)
     if (isalpha(lex->cur[0]) || lex->cur[0] == '_') {
         if (lex->cur[0] == 'L' && lex->cur[1] == '"')
             lexer_scan_string(lex, /* is_wide */ true);
+        else if (lex->cur[0] == 'L' && lex->cur[1] == '\'')
+            lexer_scan_char(lex, /* is_wide */ true);
         else
             lexer_scan_symbol(lex);
         return;
@@ -766,7 +771,7 @@ void lexer_scan(lexer_t *lex)
         lexer_scan_string(lex, /* is_wide */ false);
         return;
     case '\'':
-        lexer_scan_char(lex);
+        lexer_scan_char(lex, /* is_wide */ false);
         return;
     case '.':
         lexer_next_char(lex);

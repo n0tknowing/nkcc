@@ -6,6 +6,7 @@ __TOKEN_DEF(wide_string_lit, "<wide-string-literal>")
 __TOKEN_DEF(float_const, "<floating-point-constant>")
 __TOKEN_DEF(int_const, "<integer-constant>")
 __TOKEN_DEF(char_const, "<character-constant>")
+__TOKEN_DEF(wide_char_const, "<wide-character-constant>")
 
 // Single character
 __TOKEN_DEF(question, "<question-mark>")
