@@ -1,0 +1,10 @@
+C89
+---
+1. Recognize source character set, this includes newline.
+2. If trigraphs exist, replace them into their alternative forms.
+3. Lexer executed.
+4. Preprocessor executed.
+5. If there is escape sequence inside a string literals or in a char constant,
+   convert to the source character set defined by phase 1.
+6. Concat adjacent string literals.
+7. Actual compilation; Parsing, Analysis, Optimizations and Codegen.
