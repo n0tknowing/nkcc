@@ -2,6 +2,7 @@ __TOKEN_DEF(eof, "<end-of-file>")
 
 // Constant
 __TOKEN_DEF(string_lit, "<string-literal>")
+__TOKEN_DEF(wide_string_lit, "<wide-string-literal>")
 __TOKEN_DEF(float_const, "<floating-point-constant>")
 __TOKEN_DEF(int_const, "<integer-constant>")
 __TOKEN_DEF(char_const, "<character-constant>")
