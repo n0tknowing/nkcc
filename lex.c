@@ -301,7 +301,7 @@ static void lexer_scan_ws_comment(lexer_t *lex)
 
 static void check_reserved_type(token_t *tok, const char *rsv, token_type_t ty)
 {
-    if (strncmp(tok->lexeme, rsv, tok->len) == 0)
+    if (memcmp(tok->lexeme, rsv, tok->len) == 0)
         tok->type = ty;
 }
 
@@ -562,17 +562,13 @@ check_suffix:
     case 'F':
         // Only for reporting error, since it's invalid to use floating-point
         // suffix on integer constant
-        if (!is_float) {
-            errf(lex, "Floating-point suffix '%c' on integer constant",
-                   lex->cur[0]);
-        }
+        if (!is_float)
+            errf(lex, "Floating-point suffix '%c' on integer constant", lex->cur[0]);
         break;
     case 'l':
         lexer_next_char(lex);
-
         if (is_float)
             break;
-
         if (lex->cur[0] == 'L') {
             errf(lex, "Invalid suffix 'lL' on integer constant");
         } else if (lex->cur[0] == 'l') {
@@ -586,10 +582,8 @@ check_suffix:
         break;
     case 'L':
         lexer_next_char(lex);
-
         if (is_float)
             break;
-
         if (lex->cur[0] == 'l') {
             errf(lex, "Invalid suffix 'Ll' on integer constant");
         } else if (lex->cur[0] == 'L') {
@@ -603,11 +597,8 @@ check_suffix:
         break;
     case 'u':
     case 'U':
-        if (is_float) {
-            errf(lex, "Integer suffix '%c' on floating-point constant",
-                 lex->cur[0]);
-        }
-
+        if (is_float)
+            errf(lex, "Integer suffix '%c' on floating-point constant", lex->cur[0]);
         lexer_next_char(lex);
         switch (lex->cur[0]) {
         case 'l':
@@ -638,92 +629,99 @@ check_suffix:
     lex->token.type = is_float ? tok_float_const : tok_int_const;
 }
 
-static void lexer_scan_string(lexer_t *lex, bool is_wide)
+static void scan_escape_sequence(lexer_t *lex)
+{
+    if (is_odigit(lex->cur[0])) { // \o
+        lexer_next_char(lex);
+        if (is_odigit(lex->cur[0])) { // \oo
+            lexer_next_char(lex);
+            if (is_odigit(lex->cur[0])) { // \ooo
+                lexer_next_char(lex);
+                if (is_odigit(lex->cur[0]))
+                    errf(lex, "octal escape sequence out of range");
+            }
+        }
+    } else if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
+        lexer_next_char(lex);
+        if (!is_xdigit(lex->cur[0]))
+            errf(lex, "no digit found after hexadecimal escape escape");
+        lexer_next_char(lex);
+        if (is_xdigit(lex->cur[0])) {
+            lexer_next_char(lex);
+            if (is_xdigit(lex->cur[0]))
+                errf(lex, "hexadecimal escape sequence out of range");
+        }
+    } else {
+        switch (lex->cur[0]) {
+        case 'a':
+        case 'b':
+        case 'f':
+        case 'n':
+        case 'r':
+        case 't':
+        case 'v':
+        case '"':
+        case '\\':
+        case '\'':
+            lexer_next_char(lex);
+            break;
+        default:
+            errf(lex, "Unknown escape sequences '\\%c'", lex->cur[0]);
+            break;
+        }
+    }
+}
+
+static void lexer_scan_string(lexer_t *lex)
 {
     lex->token.line = lex->line;
     lex->token.col = lex->col;
 
     lexer_next_char(lex);
-
-    if (is_wide)
-        lexer_next_char(lex);
-
     lex->token.lexeme = lex->cur;
 
-    if (lex->cur[0] == '"') {
-        lex->token.len = 0;
-    } else {
-        while (lex->cur < lex->end) {
+    while (lex->cur[0] != '"') {
+        if (lex->cur[0] == '\\') {
             lexer_next_char(lex);
-            if (lex->cur[0] == '\n' || lex->cur[0] == '"')
-                break;
+            scan_escape_sequence(lex);
+        } else if (lex->cur[0] == '\n') {
+            errf(lex, "newline inside string literal should be escaped");
+        } else if (lex->cur >= lex->end) {
+            break;
+        } else {
+            lexer_next_char(lex);
         }
-        if (lex->cur[0] != '"') {
-            errf(lex, "Unterminated string literal");
-            exit(1);
-        }
-        lex->token.len = lexer_count_length(lex);
     }
 
-    lex->token.type = is_wide ? tok_wide_string_lit : tok_string_lit;
+    if (lex->cur[0] != '"') {
+        errf(lex, "Unterminated string literal");
+        exit(1);
+    }
+
+    lex->token.len = lexer_count_length(lex);
+    lex->token.type = tok_string_lit;
     lexer_next_char(lex);
 }
 
-static void lexer_scan_char(lexer_t *lex, bool is_wide)
+static void lexer_scan_char(lexer_t *lex)
 {
     lex->token.line = lex->line;
     lex->token.col = lex->col;
 
     lexer_next_char(lex);
 
-    if (is_wide)
-        lexer_next_char(lex);
-
     if (lex->cur[0] == '\'') {
-        errf(lex, "Empty %scharacter constant", is_wide ? "wide " : "");
+        errf(lex, "Empty character constant");
         exit(1);
     }
 
     lex->token.lexeme = lex->cur;
 
-    if (lex->cur[0] != '\\' && isprint(lex->cur[0])) {
+    if (lex->cur[0] == '\\') {
         lexer_next_char(lex);
+        scan_escape_sequence(lex);
     } else {
-        switch (lex->cur[0]) {
-        case '\\':
-            lexer_next_char(lex);
-            if (is_odigit(lex->cur[0])) {
-                int count = 0;
-                do {
-                    lexer_next_char(lex); count++;
-                    if (lex->cur[0] == '\'') break;
-                    if (!is_odigit(lex->cur[0])) {
-                        int l = lexer_count_length(lex) + 1;
-                        const char *s = lex->token.lexeme;
-                        errf(lex, "Invalid octal constant '\%.*s'", l, s);
-                    }
-                } while (count < 3);
-                break;
-            }
-            switch (lex->cur[0]) {
-            case 'a':
-            case 'b':
-            case 'f':
-            case 'n':
-            case 'r':
-            case 't':
-            case 'v':
-            case '?': // Prevent trigraph fuckery, they said
-            case '"':
-            case '\\':
-            case '\'':
-                lexer_next_char(lex);
-                break;
-            default:
-                errf(lex, "Unknown escape sequences '\%c'", lex->cur[0]);
-                break;
-            }
-        }
+        lexer_next_char(lex);
     }
 
     if (lex->cur[0] != '\'') {
@@ -732,7 +730,7 @@ static void lexer_scan_char(lexer_t *lex, bool is_wide)
     }
 
     lex->token.len = lexer_count_length(lex);
-    lex->token.type = is_wide ? tok_wide_char_const : tok_char_const;
+    lex->token.type = tok_char_const;
     lexer_next_char(lex);
 }
 
@@ -754,10 +752,8 @@ void lexer_scan(lexer_t *lex)
     lex->token.col = lex->col;
 
     if (isalpha(lex->cur[0]) || lex->cur[0] == '_') {
-        if (lex->cur[0] == 'L' && lex->cur[1] == '"')
-            lexer_scan_string(lex, /* is_wide */ true);
-        else if (lex->cur[0] == 'L' && lex->cur[1] == '\'')
-            lexer_scan_char(lex, /* is_wide */ true);
+        if (lex->cur[0] == 'L' && (lex->cur[1] == '"' || lex->cur[1] == '\''))
+            errf(lex, "Wide character/string is not supported");
         else
             lexer_scan_symbol(lex);
         return;
@@ -768,10 +764,10 @@ void lexer_scan(lexer_t *lex)
 
     switch (lex->cur[0]) {
     case '"':
-        lexer_scan_string(lex, /* is_wide */ false);
+        lexer_scan_string(lex);
         return;
     case '\'':
-        lexer_scan_char(lex, /* is_wide */ false);
+        lexer_scan_char(lex);
         return;
     case '.':
         lexer_next_char(lex);
