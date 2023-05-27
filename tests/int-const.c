@@ -1,5 +1,7 @@
 int main(void)
 {
+    0x123;
+
     123e2;
     12u;
     12uL;
