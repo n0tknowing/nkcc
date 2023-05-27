@@ -487,20 +487,20 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
     if (lex->cur[0] == '0') {
         lexer_next_char(lex);
         if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
-            do {
-                lexer_next_char(lex);
+            lexer_next_char(lex);
+            while (is_xdigit(lex->cur[0])) {
                 strbuff_append_char(&lex->sb, lex->cur[0]);
-            } while (is_xdigit(lex->cur[0]));
-            base = 16;
-            lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
+                lexer_next_char(lex);
+            }
+            if (lex->sb.n == 0)
+                errf(lex, "missing digits after '0x' integer constant prefix");
             goto check_suffix;
         } else if (lex->cur[0] == '0') {
             do {
-                lexer_next_char(lex);
                 strbuff_append_char(&lex->sb, lex->cur[0]);
+                lexer_next_char(lex);
             } while (is_odigit(lex->cur[0]));
             base = 8;
-            lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
             goto check_suffix;
         } else {
             strbuff_append_char(&lex->sb, '0');
@@ -508,22 +508,18 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
     } else if (lex->cur[0] == '.') {
         goto scan_float;
     } else { // Base-10 integer constant
-        strbuff_append_char(&lex->sb, lex->cur[0]);
         do {
-            lexer_next_char(lex);
             strbuff_append_char(&lex->sb, lex->cur[0]);
+            lexer_next_char(lex);
         } while (is_digit(lex->cur[0]));
-        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
     }
 
     if (lex->cur[0] == '.') {
 scan_float:
-        strbuff_append_char(&lex->sb, '.');
         do {
-            lexer_next_char(lex);
             strbuff_append_char(&lex->sb, lex->cur[0]);
+            lexer_next_char(lex);
         } while (is_digit(lex->cur[0]));
-        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
         is_float = true;
     }
 
@@ -531,19 +527,15 @@ scan_float:
         strbuff_append_char(&lex->sb, lex->cur[0]);
         lexer_next_char(lex);
         if (lex->cur[0] == '+' || lex->cur[0] == '-') {
-            if (base != 10)
-                errf(lex, "exponent sign '%c' on integer constant", lex->cur[0]);
             strbuff_append_char(&lex->sb, lex->cur[0]);
             lexer_next_char(lex);
         }
         if (!is_digit(lex->cur[0]))
             errf(lex, "exponent has no digit");
-        strbuff_append_char(&lex->sb, lex->cur[0]);
         do {
+            strbuff_append_char(&lex->sb, lex->cur[0]);
             lexer_next_char(lex);
-            strbuff_append_char(&lex->sb, '.');
         } while (is_digit(lex->cur[0]));
-        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
         is_float = true;
     }
 
@@ -551,10 +543,9 @@ check_suffix:
     switch (lex->cur[0]) {
     case 'f':
     case 'F':
-        // Only for reporting error, since it's invalid to use floating-point
-        // suffix on integer constant
         if (!is_float)
             errf(lex, "floating-point suffix '%c' on integer constant", lex->cur[0]);
+        lexer_next_char(lex);
         break;
     case 'l':
         lexer_next_char(lex);
@@ -707,6 +698,8 @@ static void lexer_scan_string(lexer_t *lex)
     if (lex->cur[0] != '"') {
         errf(lex, "unterminated string literal");
         exit(1);
+    } else if (lex->sb.n > 509) {
+        warnf(lex, "string literal with length '%d' exceed ISO C90 limit (509)", lex->sb.n);
     }
 
     lex->token.len = lexer_count_length(lex);
