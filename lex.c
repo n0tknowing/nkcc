@@ -11,7 +11,6 @@
 
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
-#include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -23,14 +22,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// === Stucts, Enums, Unions and Constants ===================================
-// ===========================================================================
-
-typedef enum {
-#define __TOKEN_DEF(__tok_type, __) tok_##__tok_type,
-    #include "token.def"
-#undef __TOKEN_DEF
-} token_type_t;
+#include "ctype.h"
+#include "strbuff.h"
+#include "token.h"
 
 typedef struct {
     const char *path;
@@ -39,41 +33,26 @@ typedef struct {
 } file_t;
 
 typedef struct {
-    token_type_t type;
-    const char *lexeme;
-    int len, col, line;
-} token_t;
-
-typedef struct {
     token_t token;
     file_t *file;
     const char *cur;
     const char *end;
     int line, col;
+    strbuff_t sb;
 } lexer_t;
 
-static const char *token_type_tables[] = {
-#define __TOKEN_DEF(__, __tok_name) __tok_name,
-    #include "token.def"
-#undef __TOKEN_DEF
-    NULL
-};
+#define is_digit(c)   (dtype_lut[(uint8_t)(c)] & (DD_))
+#define is_bdigit(c)  (dtype_lut[(uint8_t)(c)] & (DB_))
+#define is_odigit(c)  (dtype_lut[(uint8_t)(c)] & (DO_))
+#define is_xdigit(c)  (dtype_lut[(uint8_t)(c)] & (DD_|DX_))
 
-// === ctype.h ===============================================================
-// ===========================================================================
+#define DD_   0x01
+#define DB_   0x02
+#define DO_   0x04
+#define DX_   0x08
 
-#define is_digit(c)   (dtype_lut[(uint8_t)(c)] & (D_))
-#define is_bdigit(c)  (dtype_lut[(uint8_t)(c)] & (B_))
-#define is_odigit(c)  (dtype_lut[(uint8_t)(c)] & (O_))
-#define is_xdigit(c)  (dtype_lut[(uint8_t)(c)] & (D_|X_))
-
-#define D_   0x01
-#define B_   0x02
-#define O_   0x04
-#define X_   0x08
-
-#define DBO_ (D_|B_|O_)
-#define DO_  (D_|O_)
+#define DBO_ (DD_|DB_|DO_)
+#define DOO_ (DD_|DO_)
 
 static const uint8_t dtype_lut[256] = {
     0,     0,    0,    0,    0,    0,    0,    0,
@@ -82,13 +61,13 @@ static const uint8_t dtype_lut[256] = {
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
-    DBO_,  DBO_, DO_,  DO_,  DO_,  DO_,  DO_,  DO_,
-    D_,    D_,   0,    0,    0,    0,    0,    0,
-    0,     X_,   X_,   X_,   X_,   X_,   X_,   0,
+    DBO_,  DBO_, DOO_, DOO_, DOO_, DOO_, DOO_, DOO_,
+    DD_,   DD_,  0,    0,    0,    0,    0,    0,
+    0,     DX_,  DX_,  DX_,  DX_,  DX_,  DX_,  0,
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
-    0,     X_,   X_,   X_,   X_,   X_,   X_,   0,
+    0,     DX_,  DX_,  DX_,  DX_,  DX_,  DX_,  0,
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
     0,     0,    0,    0,    0,    0,    0,    0,
@@ -135,7 +114,7 @@ void errf(lexer_t *lex, const char *fmt, ...)
     const char *path = lex->file->path;
 
     fputc('\n', stderr);
-    fprintf(stderr, "\e[1;31m[%s:%d:%d] error:\e[0m ", path, line, pos);
+    fprintf(stderr, "\x1b[1;31m[%s:%d:%d] error:\x1b[0m ", path, line, pos);
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
 
@@ -153,7 +132,7 @@ void warnf(lexer_t *lex, const char *fmt, ...)
     const char *path = lex->file->path;
 
     fputc('\n', stderr);
-    fprintf(stderr, "\e[1;35m[%s:%d:%d] warning:\e[0m ", path, line, pos);
+    fprintf(stderr, "\x1b[1;35m[%s:%d:%d] warning:\x1b[0m ", path, line, pos);
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
 
@@ -200,17 +179,6 @@ void file_close(file_t *file)
 {
     if (file != NULL)
         free(file->content);
-}
-
-// === Token =================================================================
-// ===========================================================================
-
-const char *token_type_to_str(token_t *tok)
-{
-    if (tok->type >= tok_eof && tok->type < tok_invalid)
-        return token_type_tables[tok->type];
-
-    return "<INVALID>";
 }
 
 // === Lexer =================================================================
@@ -274,7 +242,7 @@ static void lexer_scan_ws_comment(lexer_t *lex)
                             lex->token.col = lex->col - 1;
                             lex->token.lexeme = lex->cur - 2;
                             lex->token.len = 2;
-                            errf(lex, "Nested comments are not allowed");
+                            errf(lex, "nested /* ... */ comments are not allowed");
                         }
                         continue;
                     } else if (lex->cur[0] == '*') {
@@ -313,7 +281,7 @@ static void lexer_scan_symbol(lexer_t *lex)
 
     do {
         lexer_next_char(lex);
-    } while (isalnum(lex->cur[0]) || lex->cur[0] == '_');
+    } while (is_alnum(lex->cur[0]) || lex->cur[0] == '_');
 
     char ch = lex->token.lexeme[0];
     lex->token.len = lexer_count_length(lex);
@@ -500,9 +468,13 @@ static void lexer_scan_symbol(lexer_t *lex)
 
 static void lexer_scan_number(lexer_t *lex, bool is_float)
 {
+    int base = 10;
+
     lex->token.lexeme = lex->cur;
     lex->token.line = lex->line;
     lex->token.col = lex->col;
+
+    strbuff_reset(&lex->sb);
 
     if (is_float)
         goto scan_float;
@@ -514,45 +486,64 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
     //  - 00  -- which means octal constant
     if (lex->cur[0] == '0') {
         lexer_next_char(lex);
-        if (lex->cur[0] == 'x') {
+        if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
             do {
                 lexer_next_char(lex);
+                strbuff_append_char(&lex->sb, lex->cur[0]);
             } while (is_xdigit(lex->cur[0]));
+            base = 16;
+            lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
             goto check_suffix;
         } else if (lex->cur[0] == '0') {
             do {
                 lexer_next_char(lex);
+                strbuff_append_char(&lex->sb, lex->cur[0]);
             } while (is_odigit(lex->cur[0]));
+            base = 8;
+            lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
             goto check_suffix;
-        } // else only 0
+        } else {
+            strbuff_append_char(&lex->sb, '0');
+        }
     } else if (lex->cur[0] == '.') {
         goto scan_float;
     } else { // Base-10 integer constant
+        strbuff_append_char(&lex->sb, lex->cur[0]);
         do {
             lexer_next_char(lex);
+            strbuff_append_char(&lex->sb, lex->cur[0]);
         } while (is_digit(lex->cur[0]));
+        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
     }
 
     if (lex->cur[0] == '.') {
 scan_float:
+        strbuff_append_char(&lex->sb, '.');
         do {
             lexer_next_char(lex);
+            strbuff_append_char(&lex->sb, lex->cur[0]);
         } while (is_digit(lex->cur[0]));
+        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
         is_float = true;
     }
 
     if (lex->cur[0] == 'e' || lex->cur[0] == 'E') {
+        strbuff_append_char(&lex->sb, lex->cur[0]);
         lexer_next_char(lex);
         if (lex->cur[0] == '+' || lex->cur[0] == '-') {
-            if (!is_float)
-                errf(lex, "Exponent sign '%c' on integer constant", lex->cur[0]);
+            if (base != 10)
+                errf(lex, "exponent sign '%c' on integer constant", lex->cur[0]);
+            strbuff_append_char(&lex->sb, lex->cur[0]);
             lexer_next_char(lex);
         }
         if (!is_digit(lex->cur[0]))
-            errf(lex, "Exponent has no digit");
+            errf(lex, "exponent has no digit");
+        strbuff_append_char(&lex->sb, lex->cur[0]);
         do {
             lexer_next_char(lex);
+            strbuff_append_char(&lex->sb, '.');
         } while (is_digit(lex->cur[0]));
+        lex->sb.buf[--lex->sb.n] = 0; // reject non-digit
         is_float = true;
     }
 
@@ -563,20 +554,20 @@ check_suffix:
         // Only for reporting error, since it's invalid to use floating-point
         // suffix on integer constant
         if (!is_float)
-            errf(lex, "Floating-point suffix '%c' on integer constant", lex->cur[0]);
+            errf(lex, "floating-point suffix '%c' on integer constant", lex->cur[0]);
         break;
     case 'l':
         lexer_next_char(lex);
         if (is_float)
             break;
         if (lex->cur[0] == 'L') {
-            errf(lex, "Invalid suffix 'lL' on integer constant");
+            errf(lex, "invalid suffix 'lL' on integer constant");
         } else if (lex->cur[0] == 'l') {
             lexer_next_char(lex);
-            if (tolower(lex->cur[0]) == 'u') // unsigned-long-long (llu or llU)
+            if (to_lower(lex->cur[0]) == 'u') // unsigned-long-long (llu or llU)
                 lexer_next_char(lex);
             // else unsigned-long (lu or lU)
-        } else if (tolower(lex->cur[0]) == 'u') { // unsigned-long (lu or lU)
+        } else if (to_lower(lex->cur[0]) == 'u') { // unsigned-long (lu or lU)
             lexer_next_char(lex);
         } // else long (l)
         break;
@@ -585,26 +576,26 @@ check_suffix:
         if (is_float)
             break;
         if (lex->cur[0] == 'l') {
-            errf(lex, "Invalid suffix 'Ll' on integer constant");
+            errf(lex, "invalid suffix 'Ll' on integer constant");
         } else if (lex->cur[0] == 'L') {
             lexer_next_char(lex);
-            if (tolower(lex->cur[0]) == 'u') // unsigned-long-long (LLu or LLU)
+            if (to_lower(lex->cur[0]) == 'u') // unsigned-long-long (LLu or LLU)
                 lexer_next_char(lex);
             // else unsigned-long (Lu or LU)
-        } else if (tolower(lex->cur[0]) == 'u') { // unsigned-long (Lu or LU)
+        } else if (to_lower(lex->cur[0]) == 'u') { // unsigned-long (Lu or LU)
             lexer_next_char(lex);
         } // else long (L)
         break;
     case 'u':
     case 'U':
         if (is_float)
-            errf(lex, "Integer suffix '%c' on floating-point constant", lex->cur[0]);
+            errf(lex, "integer suffix '%c' on floating-point constant", lex->cur[0]);
         lexer_next_char(lex);
         switch (lex->cur[0]) {
         case 'l':
             lexer_next_char(lex);
             if (lex->cur[0] == 'L')
-                errf(lex, "Invalid suffix 'ulL' on integer constant");
+                errf(lex, "invalid suffix 'ulL' on integer constant");
             else if (lex->cur[0] == 'l') // unsigned-long-long (ull or Ull)
                 lexer_next_char(lex);
             // else unsigned-long (ul or Ul)
@@ -612,7 +603,7 @@ check_suffix:
         case 'L':
             lexer_next_char(lex);
             if (lex->cur[0] == 'l')
-                errf(lex, "Invalid suffix 'uLl' on integer constant");
+                errf(lex, "invalid suffix 'uLl' on integer constant");
             else if (lex->cur[0] == 'L') // unsigned-long-long (uLL or ULL)
                 lexer_next_char(lex);
             // else unsigned-long (uL or UL)
@@ -629,13 +620,25 @@ check_suffix:
     lex->token.type = is_float ? tok_float_const : tok_int_const;
 }
 
-static void scan_escape_sequence(lexer_t *lex)
+static int hex_char(char ch)
 {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    else if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    else return ch - 'a' + 10;
+}
+
+static char scan_escape_sequence(lexer_t *lex)
+{
+    char ch = lex->cur[0];
+
     if (is_odigit(lex->cur[0])) { // \o
+        ch = lex->cur[0] - '0';
         lexer_next_char(lex);
         if (is_odigit(lex->cur[0])) { // \oo
+            ch = (ch << 3) + (lex->cur[0] - '0');
             lexer_next_char(lex);
             if (is_odigit(lex->cur[0])) { // \ooo
+                ch = (ch << 3) + (lex->cur[0] - '0');
                 lexer_next_char(lex);
                 if (is_odigit(lex->cur[0]))
                     errf(lex, "octal escape sequence out of range");
@@ -645,31 +648,37 @@ static void scan_escape_sequence(lexer_t *lex)
         lexer_next_char(lex);
         if (!is_xdigit(lex->cur[0]))
             errf(lex, "no digit found after hexadecimal escape escape");
+        ch = hex_char(lex->cur[0]);
         lexer_next_char(lex);
         if (is_xdigit(lex->cur[0])) {
+            ch = (ch << 4) + hex_char(lex->cur[0]);
             lexer_next_char(lex);
             if (is_xdigit(lex->cur[0]))
                 errf(lex, "hexadecimal escape sequence out of range");
         }
     } else {
         switch (lex->cur[0]) {
-        case 'a':
-        case 'b':
-        case 'f':
-        case 'n':
-        case 'r':
-        case 't':
-        case 'v':
+        case 'a':   ch = '\a'; break;
+        case 'b':   ch = '\b'; break;
+        case 'f':   ch = '\f'; break;
+        case 'n':   ch = '\n'; break;
+        case 'r':   ch = '\r'; break;
+        case 't':   ch = '\t'; break;
+        case 'v':   ch = '\v'; break;
         case '"':
         case '\\':
         case '\'':
-            lexer_next_char(lex);
+            ch = lex->cur[0];
             break;
         default:
-            errf(lex, "Unknown escape sequences '\\%c'", lex->cur[0]);
+            errf(lex, "unknown escape sequence '\\%c'", lex->cur[0]);
             break;
         }
+
+        lexer_next_char(lex);
     }
+
+    return ch;
 }
 
 static void lexer_scan_string(lexer_t *lex)
@@ -677,24 +686,26 @@ static void lexer_scan_string(lexer_t *lex)
     lex->token.line = lex->line;
     lex->token.col = lex->col;
 
+    strbuff_reset(&lex->sb);
     lexer_next_char(lex);
     lex->token.lexeme = lex->cur;
 
     while (lex->cur[0] != '"') {
         if (lex->cur[0] == '\\') {
             lexer_next_char(lex);
-            scan_escape_sequence(lex);
+            strbuff_append_char(&lex->sb, scan_escape_sequence(lex));
         } else if (lex->cur[0] == '\n') {
             errf(lex, "newline inside string literal should be escaped");
         } else if (lex->cur >= lex->end) {
             break;
         } else {
+            strbuff_append_char(&lex->sb, lex->cur[0]);
             lexer_next_char(lex);
         }
     }
 
     if (lex->cur[0] != '"') {
-        errf(lex, "Unterminated string literal");
+        errf(lex, "unterminated string literal");
         exit(1);
     }
 
@@ -711,7 +722,7 @@ static void lexer_scan_char(lexer_t *lex)
     lexer_next_char(lex);
 
     if (lex->cur[0] == '\'') {
-        errf(lex, "Empty character constant");
+        errf(lex, "empty character constant");
         exit(1);
     }
 
@@ -725,7 +736,7 @@ static void lexer_scan_char(lexer_t *lex)
     }
 
     if (lex->cur[0] != '\'') {
-        errf(lex, "Unterminated character constant");
+        errf(lex, "unterminated character constant");
         exit(1);
     }
 
@@ -751,7 +762,7 @@ void lexer_scan(lexer_t *lex)
     lex->token.len = 1;
     lex->token.col = lex->col;
 
-    if (isalpha(lex->cur[0]) || lex->cur[0] == '_') {
+    if (is_alpha(lex->cur[0]) || lex->cur[0] == '_') {
         if (lex->cur[0] == 'L' && (lex->cur[1] == '"' || lex->cur[1] == '\''))
             errf(lex, "Wide character/string is not supported");
         else
@@ -997,6 +1008,7 @@ void lexer_scan(lexer_t *lex)
 void lexer_setup(lexer_t *lex, file_t *file)
 {
     memset(&lex->token, 0, sizeof(lex->token));
+    strbuff_setup(&lex->sb);
 
     lex->line = 1;
     lex->col = 1;
@@ -1008,6 +1020,7 @@ void lexer_setup(lexer_t *lex, file_t *file)
 
 void lexer_cleanup(lexer_t *lex)
 {
+    strbuff_cleanup(&lex->sb);
     memset(lex, 0, sizeof(*lex));
 }
 
