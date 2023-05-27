@@ -1,6 +1,9 @@
 int main(void)
 {
     0x123;
+    1111;
+    33;
+    3432134;
 
     123e2;
     12u;
@@ -21,7 +24,9 @@ int main(void)
     12lU;
     12llU;
 
-    12ulL;
+    00;
+    0x;
+    //12ulL;
 
     return 0;
 }
