@@ -1,4 +1,2 @@
 - Better file handling
-- New function to handle escaped character
-- Complete string literal scanning
 - C preprocessor
