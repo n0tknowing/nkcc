@@ -1,10 +1,12 @@
+Note that this is modified to make it easy to implement.
+Lexical analysis is run lazily at phase 2 and 4.
+
 C89
 ---
-1. Recognize source character set, this includes newline.
-2. If trigraphs exist, replace them into their alternative forms.
-3. Lexer executed.
-4. Preprocessor executed.
-5. If there is escape sequence inside a string literals or in a char constant,
-   convert to the source character set defined by phase 1.
-6. Concat adjacent string literals.
-7. Actual compilation; Parsing, Analysis, Optimizations and Codegen.
+1. Recognize source character set, also replace newline in source code to
+   the host newline (e.g. \r\n become \n). If trigraphs exist, replace them
+   into their alternative forms. And last, merge line continuation.
+2. Preprocessor executed. When #include encountered, scan the included file
+   from the phase 1.
+3. Concat adjacent string literals.
+4. Actual compilation; Parsing, Analysis, Optimizations and Codegen.
