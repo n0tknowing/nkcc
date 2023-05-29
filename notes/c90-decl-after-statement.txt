@@ -1,0 +1,56 @@
+In C89/C90, declarations must be placed at top of block.
+This rule is relaxed in C99.
+
+This is valid.
+
+    int main(void) {
+        int a = 1;
+        int b = 2;
+
+        {  /* Start new block */
+            int c = 3;
+            int d = 4;
+            b = c + d;
+        }
+
+        return a == b;
+    }
+
+This is also valid.
+
+    int main(void) {
+        int a = 1;
+        int b = 2;
+
+        {
+            int c = 3;
+            int d = 4;
+            b = c + d;
+
+            if (a == b) { /* Start new block */
+                int e = 5;
+                b += e;
+            }
+        }
+
+        return a == b;
+    }
+
+But this is not.
+
+    int main(void) {
+        int a = 1;
+        int b = 2;
+
+        {
+            if (a == b) {
+                return 1;
+            }
+
+            int c = 3;
+            int d = 4;
+            b = c + d;
+        }
+
+        return a == b;
+    }
