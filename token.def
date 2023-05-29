@@ -32,6 +32,7 @@ __TOKEN_DEF(caret, "<caret>")
 __TOKEN_DEF(tilde, "<tilde>")
 __TOKEN_DEF(bang, "<bang>")
 __TOKEN_DEF(equal, "<equal>")
+__TOKEN_DEF(newline, "<newline>")
 
 // Multi character
 __TOKEN_DEF(pp_paste, "<preprocessor-token-paste>")

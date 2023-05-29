@@ -211,15 +211,30 @@ static int lexer_count_length(lexer_t *lex)
     return (int)(lex->cur - lex->token.lexeme);
 }
 
-static void lexer_scan_ws_comment(lexer_t *lex)
+static void lexer_reset_line(lexer_t *lex)
+{
+    lex->col = 0;
+    lex->line++;
+}
+
+static bool lexer_scan_whitespace_comment(lexer_t *lex, bool nl_tok)
 {
     while (lex->cur < lex->end) {
+        int prev_col = lex->col;
         switch (lex->cur[0]) {
-        case '\r':
         case '\n':
-            lex->col = 0;
-            lex->line++;
+            lexer_reset_line(lex);
+            if (nl_tok) {
+                lex->token.len = 1;
+                lex->token.type = tok_newline;
+                lex->token.lexeme = lex->cur;
+                lex->token.col = prev_col;
+                lex->token.line = lex->line == 1 ? lex->line : lex->line - 1;
+                lexer_next_char(lex);
+                return true;
+            }
             // fallthrough
+        case '\r':
         case '\f':
         case '\t':
         case '\v':
@@ -230,8 +245,7 @@ static void lexer_scan_ws_comment(lexer_t *lex)
             if (lex->cur[1] == '/') {
                 lexer_next_char(lex); lexer_next_char(lex);
                 if (lex->cur[0] == '\n') {
-                    lex->col = 0;
-                    lex->line++;
+                    lexer_reset_line(lex);
                     lexer_next_char(lex);
                 } else {
                     while (lex->cur < lex->end) {
@@ -243,8 +257,7 @@ static void lexer_scan_ws_comment(lexer_t *lex)
                 lexer_next_char(lex); lexer_next_char(lex);
                 while (lex->cur < lex->end) {
                     if (lex->cur[0] == '\n') {
-                        lex->col = 0;
-                        lex->line++;
+                        lexer_reset_line(lex);
                     } else if (lex->cur[0] == '/') {
                         lexer_next_char(lex);
                         if (lex->cur[0] == '*') {
@@ -258,8 +271,7 @@ static void lexer_scan_ws_comment(lexer_t *lex)
                     } else if (lex->cur[0] == '*') {
                         lexer_next_char(lex);
                         if (lex->cur[0] == '\n') {
-                            lex->col = 0;
-                            lex->line++;
+                            lexer_reset_line(lex);
                         } else if (lex->cur[0] == '/') {
                             lexer_next_char(lex);
                             break;
@@ -268,13 +280,15 @@ static void lexer_scan_ws_comment(lexer_t *lex)
                     lexer_next_char(lex);
                 }
             } else {
-                return;
+                return false;
             }
             break;
         default:
-            return;
+            return false;
         }
     }
+
+    return false;
 }
 
 static void check_reserved_type(token_t *tok, const char *rsv, token_type_t ty)
@@ -489,7 +503,7 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
     if (is_float)
         goto scan_float;
 
-    // Check if there is other bases denoted by their prefix.
+    // Check if there is other bases specified by their prefix.
     //
     // This includes:
     //  - 0x  -- which means hexadecimal constant.
@@ -621,7 +635,7 @@ check_suffix:
     lex->token.type = is_float ? tok_float_const : tok_int_const;
 }
 
-static int hex_char(char ch)
+static int hexchar_digit(char ch)
 {
     if (ch >= '0' && ch <= '9') return ch - '0';
     else if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
@@ -648,11 +662,11 @@ static char scan_escape_sequence(lexer_t *lex)
     } else if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
         lexer_next_char(lex);
         if (!is_xdigit(lex->cur[0]))
-            errf(lex, "no digit found after hexadecimal escape escape");
-        ch = hex_char(lex->cur[0]);
+            errf(lex, "no digit found after hexadecimal escape sequence");
+        ch = hexchar_digit(lex->cur[0]);
         lexer_next_char(lex);
         if (is_xdigit(lex->cur[0])) {
-            ch = (ch << 4) + hex_char(lex->cur[0]);
+            ch = (ch << 4) + hexchar_digit(lex->cur[0]);
             lexer_next_char(lex);
             if (is_xdigit(lex->cur[0]))
                 errf(lex, "hexadecimal escape sequence out of range");
@@ -747,9 +761,10 @@ static void lexer_scan_char(lexer_t *lex)
     lexer_next_char(lex);
 }
 
-void lexer_scan(lexer_t *lex)
+static void lexer_scan_internal(lexer_t *lex, bool nl_token)
 {
-    lexer_scan_ws_comment(lex);
+    if (lexer_scan_whitespace_comment(lex, nl_token) && nl_token)
+        return;
 
     if (lex->cur >= lex->end || lex->cur[0] == '\0') {
         lex->token.type = tok_eof;
@@ -1007,6 +1022,16 @@ void lexer_scan(lexer_t *lex)
     lexer_next_char(lex);
 }
 
+void lexer_next_with_newline(lexer_t *lex)
+{
+    lexer_scan_internal(lex, true);
+}
+
+void lexer_next(lexer_t *lex)
+{
+    lexer_scan_internal(lex, false);
+}
+
 void lexer_setup(lexer_t *lex, file_t *file)
 {
     memset(&lex->token, 0, sizeof(lex->token));
@@ -1179,7 +1204,7 @@ void print_token(file_t *file)
     lexer_setup(&lex, file);
 
     do {
-        lexer_scan(&lex);
+        lexer_next(&lex);
 #if 1
         int l = lex.token.len;
         int ln = lex.token.line;
@@ -1213,7 +1238,7 @@ int main(int argc, char **argv)
     if (file_read(&file, argv[1]) == -1)
         return 1;
 
-    lexer_run_phase_1_2(&file, true);
+    lexer_run_phase_1_2(&file, false);
     print_token(&file);
 
     file_close(&file);
