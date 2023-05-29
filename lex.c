@@ -144,17 +144,23 @@ void warnf(lexer_t *lex, const char *fmt, ...)
 
 int file_read(file_t *file, const char *path)
 {
-    int fd = open(path, O_RDONLY);
-    if (fd == -1) return -1;
-
+    int fd, rc;
+    size_t size;
     struct stat sb;
+
+    rc = 0;
+
+    fd = open(path, O_RDONLY);
+    if (fd == -1)
+        return -1;
+
     if (fstat(fd, &sb) == -1)
         goto close_file;
 
     if (!S_ISREG(sb.st_mode))
         goto close_file;
 
-    size_t size = (size_t)sb.st_size;
+    size = (size_t)sb.st_size;
     if (size == 0)
         goto close_file;
 
@@ -165,10 +171,14 @@ int file_read(file_t *file, const char *path)
     read(fd, file->content, size);
     file->size = size;
     file->path = path;
-    file->content[size] = EOF;
+
+    if (file->content[size - 1] != '\n') {
+        file->content[size - 1] = '\n';
+        rc = 1;
+    }
 
     close(fd);
-    return 0;
+    return rc;
 
 close_file:
     close(fd);
@@ -482,8 +492,8 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
     // Check if there is other bases denoted by their prefix.
     //
     // This includes:
-    //  - 0x  -- which means hexadecimal constant
-    //  - 00  -- which means octal constant
+    //  - 0x  -- which means hexadecimal constant.
+    //  - 00  -- which means octal constant.
     if (lex->cur[0] == '0') {
         lexer_next_char(lex);
         if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
@@ -507,7 +517,7 @@ static void lexer_scan_number(lexer_t *lex, bool is_float)
         }
     } else if (lex->cur[0] == '.') {
         goto scan_float;
-    } else { // Base-10 integer constant
+    } else { // Base-10 integer constant.
         do {
             strbuff_append_char(&lex->sb, lex->cur[0]);
             lexer_next_char(lex);
@@ -656,6 +666,7 @@ static char scan_escape_sequence(lexer_t *lex)
         case 'r':   ch = '\r'; break;
         case 't':   ch = '\t'; break;
         case 'v':   ch = '\v'; break;
+        case '?':   ch = '?';  break;
         case '"':
         case '\\':
         case '\'':
@@ -695,12 +706,10 @@ static void lexer_scan_string(lexer_t *lex)
         }
     }
 
-    if (lex->cur[0] != '"') {
+    if (lex->cur[0] != '"')
         errf(lex, "unterminated string literal");
-        exit(1);
-    } else if (lex->sb.n > 509) {
+    else if (lex->sb.n > 509)
         warnf(lex, "string literal with length '%d' exceed ISO C90 limit (509)", lex->sb.n);
-    }
 
     lex->token.len = lexer_count_length(lex);
     lex->token.type = tok_string_lit;
@@ -742,7 +751,7 @@ void lexer_scan(lexer_t *lex)
 {
     lexer_scan_ws_comment(lex);
 
-    if (lex->cur >= lex->end) {
+    if (lex->cur >= lex->end || lex->cur[0] == '\0') {
         lex->token.type = tok_eof;
         lex->token.lexeme = lex->end;
         lex->token.len = 0;
@@ -1017,6 +1026,150 @@ void lexer_cleanup(lexer_t *lex)
     memset(lex, 0, sizeof(*lex));
 }
 
+// === Phase 1 ===============================================================
+// ===========================================================================
+
+static void scan_and_use_host_newline(file_t *file)
+{
+    char *p;
+    size_t ri, wi, n;
+
+    p = file->content;
+    n = file->size;
+    ri = wi = 0;  /* ri = read index, wi = write index */
+
+    while (ri < n) {
+        if (p[ri] == '\n' && p[ri + 1] == '\r') {  /* Is \n\r really exist? */
+            p[wi++] = '\n';
+            ri += 2;
+        } else if (p[ri] == '\r') {
+            if (p[ri + 1] == '\n') ri += 2;
+            else ri++;
+            p[wi++] = '\n';
+        } else {
+            p[wi++] = p[ri++];
+        }
+    }
+}
+
+static char trigraph_char(char ch)
+{
+    switch (ch) {
+    case '=': return '#';
+    case '(': return '[';
+    case '/': return '\\';
+    case ')': return ']';
+    case '<': return '{';
+    case '!': return '|';
+    case '>': return '}';
+    case '-': return '~';
+    case '\'': return '^';
+    default: return '\0';
+    }
+}
+
+static void scan_trigraph(file_t *file, bool replace_trigraph)
+{
+    char *p;
+    lexer_t lex;
+    size_t ri, wi, n;
+
+    memset(&lex, 0, sizeof(lex));
+    p = file->content;
+    n = file->size;
+    ri = wi = 0;
+
+    lex.file = file;
+    lex.token.col = 1;
+    lex.token.line = 1;
+
+    while (ri < n) {
+        if (p[ri] == '?' && p[ri + 1] == '?' && trigraph_char(p[ri + 2])) {
+            if (replace_trigraph) {
+                p[wi++] = trigraph_char(p[ri + 2]);
+            } else {
+                lex.token.len = 3;
+                warnf(&lex, "trigraph is ignored");
+                memcpy(&p[wi], &p[ri], 3);
+                wi += 3;
+            }
+            ri += 3;
+        } else if (p[ri] == '/' && (p[ri + 1] == '/' || p[ri + 1] == '*')) {
+            /*
+             * Track newlines and columns on both C-style and C++-style
+             * comments for better diagnostic message if trigraphs is found.
+             */
+            if (p[ri + 1] == '/') {
+                p[wi++] = p[ri++];
+                p[wi++] = p[ri++];
+                if (p[ri] == '\n') {
+                    lex.token.col = 0;
+                    lex.token.line++;
+                    p[wi++] = p[ri++];
+                } else {
+                    while (p[ri] != '\n')
+                        p[wi++] = p[ri++];
+                }
+            } else if (p[ri + 1] == '*') {
+                p[wi++] = p[ri++];
+                p[wi++] = p[ri++];
+                while (ri < n) {
+                    if (p[ri] == '\n') {
+                        lex.token.col = 0;
+                        lex.token.line++;
+                        p[wi++] = p[ri++];
+                    } else if (p[ri] == '*') {
+                        p[wi++] = p[ri++];
+                        if (p[ri] == '\n') {
+                            lex.token.col = 0;
+                            lex.token.line++;
+                            p[wi++] = p[ri++];
+                        } else if (p[ri] == '/') {
+                            p[wi++] = p[ri++];
+                            break;
+                        }
+                    } else {
+                        p[wi++] = p[ri++];
+                    }
+                }
+            }
+        } else {
+            if (p[ri] == '\n') {
+                lex.token.col = 0;
+                lex.token.line++;
+            }
+            p[wi++] = p[ri++];
+        }
+        lex.token.col++;
+    }
+
+    p[wi] = '\0';
+}
+
+#if 0
+static void scan_backslash_newline(file_t *file)
+{
+    char *p;
+    size_t wi, ri, n;
+
+    p = file->content;
+    n = file->size;
+    wi = ri = 0;
+
+    while (ri < n) {
+        ri++;
+        wi++;
+    }
+}
+#endif
+
+void lexer_run_phase_1_2(file_t *file, bool replace_trigraph)
+{
+    scan_and_use_host_newline(file);
+    scan_trigraph(file, replace_trigraph);
+    // scan_backslash_newline(file);
+}
+
 // === Main ==================================================================
 // ===========================================================================
 
@@ -1041,6 +1194,12 @@ void print_token(file_t *file)
     lexer_cleanup(&lex);
 }
 
+//printf("Eh???/n");
+
+/*
+ * printf("Eh???/n");
+ */
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -1048,10 +1207,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    printf("Eh???/n");
+
     file_t file;
     if (file_read(&file, argv[1]) == -1)
         return 1;
 
+    lexer_run_phase_1_2(&file, true);
     print_token(&file);
+
     file_close(&file);
 }
