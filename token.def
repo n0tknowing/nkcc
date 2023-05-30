@@ -33,6 +33,7 @@ __TOKEN_DEF(tilde, "<tilde>")
 __TOKEN_DEF(bang, "<bang>")
 __TOKEN_DEF(equal, "<equal>")
 __TOKEN_DEF(newline, "<newline>")
+__TOKEN_DEF(backslash, "<backslash>")
 
 // Multi character
 __TOKEN_DEF(pp_paste, "<preprocessor-token-paste>")

@@ -1014,6 +1014,9 @@ static void lexer_scan_internal(lexer_t *lex, bool nl_token)
     case ',':
         lex->token.type = tok_comma;
         break;
+    case '\\':
+        lex->token.type = tok_backslash;
+        break;
     default:
         lex->token.type = tok_invalid;
         break;
