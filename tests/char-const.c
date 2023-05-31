@@ -1,3 +1,3 @@
 char ch = '\101';
-char c = '\x41';
+char c = '\xk1';
 int main(void) {}
