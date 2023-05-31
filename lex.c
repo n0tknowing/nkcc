@@ -715,10 +715,6 @@ static char scan_escape_sequence(lexer_t *lex)
             if (is_odigit(lex->cur[0])) { // \ooo
                 ch = (ch << 3) + (lex->cur[0] - '0');
                 lexer_next_char(lex);
-                if (is_odigit(lex->cur[0])) {
-                    lex->token.len = lexer_count_length(lex);
-                    errf(lex, "octal escape sequence out of range");
-                }
             }
         }
     } else if (lex->cur[0] == 'x' || lex->cur[0] == 'X') {
@@ -730,10 +726,6 @@ static char scan_escape_sequence(lexer_t *lex)
         if (is_xdigit(lex->cur[0])) {
             ch = (ch << 4) + hexchar_digit(lex->cur[0]);
             lexer_next_char(lex);
-            if (is_xdigit(lex->cur[0])) {
-                lex->token.len = lexer_count_length(lex);
-                errf(lex, "hexadecimal escape sequence out of range");
-            }
         }
     } else {
         switch (lex->cur[0]) {
