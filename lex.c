@@ -349,7 +349,7 @@ static void lexer_scan_symbol(lexer_t *lex)
 
     do {
         lexer_next_char(lex);
-    } while (is_alnum(lex->cur[0]) || lex->cur[0] == '_');
+    } while (is_alnum(lex->cur[0]) || lex->cur[0] == '_' || lex->cur[0] == '$');
 
     char ch = lex->token.lexeme[0];
     lex->token.len = lexer_count_length(lex);
@@ -835,7 +835,7 @@ static void lexer_scan_internal(lexer_t *lex, bool nl_token)
     lex->token.len = 1;
     lex->token.col = lex->col;
 
-    if (is_alpha(lex->cur[0]) || lex->cur[0] == '_') {
+    if (is_alpha(lex->cur[0]) || lex->cur[0] == '_' || lex->cur[0] == '$') {
         if (lex->cur[0] == 'L' && (lex->cur[1] == '"' || lex->cur[1] == '\''))
             errf(lex, "Wide character/string is not supported");
         else
