@@ -1,0 +1,21 @@
+List of libc functions that is safe to optimize
+
+string.h
+--------
+1. strlen("hello")          -> integer constant 5
+
+stdio.h
+-------
+1. printf("hello\n")        -> puts("hello")
+2. printf("hello")          -> fputs("hello", stdout)
+3. printf("<ch>")           -> putchar('<ch>'), <ch> is single character
+4. fprintf(fp, "hello")     -> fputs("hello", fp)
+5. fprintf(fp, "<ch>")      -> fputc('<ch>, fp'), <ch> is single character
+6. fprintf(fp, "hello\n")   -> fputs("hello\n", fp)
+
+==============================================================================
+
+List of libc functions that is not safe to optimize
+
+1. Pretty much anything that not listed in the safe to optimize section are
+   not safe.

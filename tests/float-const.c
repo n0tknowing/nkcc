@@ -8,5 +8,6 @@ int main(void)
     x = 12.;
     x = 12e1f;
     x = 12e-1;
+    x = .12.;
     return 0;
 }
