@@ -183,6 +183,8 @@ void cpp_file_close(cpp_file *file)
 
 cpp_file *cpp_file_id(ushort id)
 {
-    err_if(id >= g_file_count, "invalid file id %02x\n", id);
-    return &g_files[id];
+    if (id < g_file_count)
+        return &g_files[id];
+    errno = EINVAL;
+    return NULL;
 }
