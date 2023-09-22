@@ -6,6 +6,7 @@
 static void cpp_preprocess(cpp_context *ctx, cpp_token *tk);
 static void cpp_stream_push(cpp_context *ctx, cpp_file *file);
 static void cpp_stream_pop(cpp_context *ctx);
+static void builtin_macro_setup(cpp_context *ctx);
 static void macro_stack_pop(cpp_context *ctx);
 static void cpp_buffer_cleanup(cpp_context *ctx);
 static void cond_stack_cleanup(cpp_context *ctx);
@@ -19,11 +20,12 @@ static uchar expand(cpp_context *ctx, cpp_token *tk);
 static string_ref g__VA_ARGS__,
                   g__FILE__,
                   g__LINE__,
+                  g__DATE__,
+                  g__TIME__,
                   g__COUNTER__,
                   g__BASE_FILE__,
                   g__TIMESTAMP__,
-                  g__DATE__,
-                  g__TIME__;
+                  g_defined;
 
 
 /* ------------------------------------------------------------------------ */
@@ -41,6 +43,7 @@ void cpp_context_setup(cpp_context *ctx)
     g__TIMESTAMP__ = LITREF("__TIMESTAMP__");
     g__DATE__ = LITREF("__DATE__");
     g__TIME__ = LITREF("__TIME__");
+    g_defined = LITREF("defined");
 
     memset(ctx, 0, sizeof(cpp_context));
 
@@ -51,6 +54,8 @@ void cpp_context_setup(cpp_context *ctx)
     cpp_token_array_setup(&ctx->line, 8);
 
     cpp_lex_setup(ctx);
+
+    builtin_macro_setup(ctx);
 }
 
 void cpp_context_cleanup(cpp_context *ctx)
@@ -101,9 +106,6 @@ void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp)
     int delta, i;
     uint lineno = 1;
     cpp_stream_push(ctx, file);
-
-    fputs("# 0 \"<built-in>\"\n", fp);
-    fputs("# 0 \"<command-line>\"\n", fp);
 
     while (1) {
         cpp_preprocess(ctx, &tk);
@@ -495,6 +497,27 @@ static void cond_stack_cleanup(cpp_context *ctx)
 }
 
 /* ---- macro stuff ------------------------------------------------------- */
+
+#define ADD_BUILTIN(name) do {                          \
+        m = macro_new(name, CPP_MACRO_BUILTIN, dummy);  \
+        hash_table_insert(&ctx->macro, name, m);        \
+    } while (0)
+
+static cpp_macro *macro_new(string_ref name, uchar flags, cpp_token_array body);
+static cpp_token_array dummy;
+
+static void builtin_macro_setup(cpp_context *ctx)
+{
+    cpp_macro *m;
+
+    ADD_BUILTIN(g__FILE__);
+    ADD_BUILTIN(g__LINE__);
+    ADD_BUILTIN(g__COUNTER__);
+    ADD_BUILTIN(g__BASE_FILE__);
+    ADD_BUILTIN(g__TIMESTAMP__);
+    ADD_BUILTIN(g__DATE__);
+    ADD_BUILTIN(g__TIME__);
+}
 
 static void macro_stack_push(cpp_context *ctx, string_ref name)
 {
@@ -1043,15 +1066,20 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 static uchar expand(cpp_context *ctx, cpp_token *tk)
 {
     uint i;
-    cpp_macro *m;
     uchar buf[1024];
     uint len = cpp_token_splice(tk, buf, sizeof(buf));
     string_ref name = string_ref_newlen((const char *)buf, len);
+    cpp_macro *m = hash_table_lookup(&ctx->macro, name);
+    if (m == NULL)
+        return 0;
 
-    if (name >= g__FILE__ && name <= g__TIME__) {
+    if (HAS_FLAG(m->flags, CPP_MACRO_BUILTIN)) {
         expand_builtin(ctx, name, tk);
         return 0; /* Special; No rescanning needed */
     }
+
+    macro_stack *ms = NULL;
+    cpp_token macro_tk = *tk;
 
     if (HAS_FLAG(tk->flags, CPP_TOKEN_NOEXPAND))
         return 0;
@@ -1060,13 +1088,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
         tk->flags |= CPP_TOKEN_NOEXPAND;
         return 0;
     }
-
-    m = hash_table_lookup(&ctx->macro, name);
-    if (m == NULL)
-        return 0;
-
-    macro_stack *ms = NULL;
-    cpp_token macro_tk = *tk;
 
     if (HAS_FLAG(m->flags, CPP_MACRO_FUNC)) {
         ht_t args;
@@ -1113,8 +1134,14 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
 
     len = cpp_token_splice(tk, buf, sizeof(buf));
     name = string_ref_newlen((const char *)buf, len);
-    m2 = hash_table_lookup(&ctx->macro, name);
+    if (name >= g__VA_ARGS__ && name <= g_defined) {
+        if (name == g_defined)
+            cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
+        else if (name == g__VA_ARGS__)
+            cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
+    }
 
+    m2 = hash_table_lookup(&ctx->macro, name);
     cpp_next(ctx, tk);
 
     if (tk->kind == '(' && tk->wscount == 0) {
@@ -1189,6 +1216,15 @@ static void do_undef(cpp_context *ctx, cpp_token *tk)
 
     len = cpp_token_splice(tk, buf, sizeof(buf));
     name = string_ref_newlen((const char *)buf, len);
+    if (name >= g__VA_ARGS__ && name <= g_defined) {
+        if (name == g_defined)
+            cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
+        else if (name == g__VA_ARGS__)
+            cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
+        else
+            cpp_warn(ctx, tk, "undefining '%s'", string_ref_ptr(name));
+    }
+
     m = hash_table_remove(&ctx->macro, name);
     if (m != NULL)
         macro_free((void *)m);

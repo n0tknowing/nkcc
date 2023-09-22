@@ -68,8 +68,9 @@ typedef unsigned int tkchar;
 
 /* flags for cpp_macro */
 #define CPP_MACRO_FUNC      1 /* this macro is function-like */
-#define CPP_MACRO_VA_ARG    2 /* this macro arg is variadic args */
-#define CPP_MACRO_GUARD     4 /* this macro is used as header guard */
+#define CPP_MACRO_BUILTIN   2 /* this macro is builtin macros */
+#define CPP_MACRO_VA_ARG    4 /* this macro arg is variadic args */
+#define CPP_MACRO_GUARD     8 /* this macro is used as header guard */
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
