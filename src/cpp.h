@@ -67,8 +67,9 @@ typedef unsigned int tkchar;
 #define CPP_COND_MAX       32 /* nested, per file */
 
 /* flags for cpp_macro */
-#define CPP_MACRO_FUNC      1
-#define CPP_MACRO_VA_ARG    2
+#define CPP_MACRO_FUNC      1 /* this macro is function-like */
+#define CPP_MACRO_VA_ARG    2 /* this macro arg is variadic args */
+#define CPP_MACRO_GUARD     4 /* this macro is used as header guard */
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
@@ -142,7 +143,8 @@ enum _cpp_token_kind {
     /* special tokens */
     TK_paste,
     TK_number,
-    TK_eom, /* used to indicate the end of rescanning phase of a macro */
+    TK_eom, /* used to indicate the end of a macro replacement list and
+               rescanning phase */
     TK_eof = 255
 };
 
@@ -209,12 +211,11 @@ typedef struct cond_stack {
     uchar flags;
     enum { COND_IF, COND_ELIF, COND_ELSE, COND_DEAD } ctx;
     cpp_token token; /* for header guard detection or diagnostic */
-    struct cond_stack *prev;
+    struct cond_stack *prev; /* nested */
 } cond_stack;
 
 typedef struct macro_stack {
     string_ref name;
-    ht_t *arg;
     cpp_token_array tok; /* used during substitution */
     const cpp_token *p; /* substituted, used during rescanning from `tok` */
     struct macro_stack *prev; /* nested */
@@ -247,7 +248,8 @@ typedef struct arg_stream {
 
 typedef struct {
     cpp_token_array ts;
-    cpp_token_array temp;
+    cpp_token_array temp; /* for backtrack */
+    cpp_token_array line; /* for #if/#elif/#line/#include */
     cpp_stream *stream;
     macro_stack *file_macro;
     arg_stream *argstream;
@@ -280,12 +282,14 @@ void cpp_file_close(cpp_file *file);
 cpp_file *cpp_file_id(ushort id);
 
 /* lex.c */
+void cpp_lex_setup(cpp_context *ctx);
+void cpp_lex_cleanup(void);
 void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar q);
 void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 
 /* token.c */
 const char *cpp_token_kind(uchar kind);
-uint cpp_token_splice(cpp_token *tk, uchar *buf, uint bufsz);
+uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, cpp_token *tk);
 void cpp_token_unpp(cpp_token *tk);
 void cpp_token_array_setup(cpp_token_array *ts, uint max);

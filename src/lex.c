@@ -8,6 +8,8 @@
 #include <string.h>
 #include "cpp.h"
 
+static cpp_context *g_context;
+
 /* handle complicated "\\\n" */
 #define CHECK_ESCNL(_s, _t) do {                                \
         if (unlikely(*(_s)->p == '\\' && (_s)->p[1] == '\n')) { \
@@ -16,6 +18,17 @@
         }                                                       \
     } while (0)
 
+
+/* ------------------------------------------------------------------------- */
+
+void cpp_lex_setup(cpp_context *ctx)
+{
+    g_context = ctx;
+}
+
+void cpp_lex_cleanup(void)
+{
+}
 
 /* ---- locale-free ctype.h ------------------------------------------------ */
 
@@ -71,6 +84,19 @@ static int tolower(int ch)
 
 /* ------------------------------------------------------------------------- */
 
+static void cpp_lex_error(cpp_stream *s, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", s->fname, s->lineno);
+    fprintf(stderr, "\x1b[1;31merror:\x1b[0m ");
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    va_end(ap);
+    cpp_context_cleanup(g_context);
+    exit(1);
+}
+
 static void cpp_lex_comment(cpp_stream *s, tkchar kind)
 {
     uint start = s->lineno;
@@ -108,9 +134,8 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
         }
     }
 
-    printf("%s:%u: error: unterminated comment\n", s->fname, start);
-    cpp_file_cleanup();
-    exit(1);
+    s->lineno = start;
+    cpp_lex_error(s, "unterminated comment");
 }
 
 void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
@@ -151,9 +176,7 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
     }
 
     if (!*s->p || *s->p == '\n') {
-        printf("%s:%u: error: missing terminating %c character\n", s->fname, s->lineno, endq);
-        cpp_file_cleanup();
-        exit(1);
+        cpp_lex_error(s, "missing terminating %c character", endq);
     } else {
         s->p++;
         tk->length = (uint)(s->p - tk->p);

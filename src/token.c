@@ -20,7 +20,7 @@ const char *cpp_token_kind(uchar kind)
         return "???";
 }
 
-uint cpp_token_splice(cpp_token *tk, uchar *buf, uint bufsz)
+uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
 {
     uint i = 0, j = 0;
     const uchar *p = tk->p;
@@ -28,7 +28,7 @@ uint cpp_token_splice(cpp_token *tk, uchar *buf, uint bufsz)
 
     if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
         while (i < len) {
-            if (i + 2 <= len && !memcmp(p + i, "\\\n", 2))
+            if (i + 2 <= len && p[i] == '\\' && p[i+1] == '\n')
                 i += 2;
             else
                 buf[j++] = p[i++];

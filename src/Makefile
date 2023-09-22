@@ -13,8 +13,10 @@ endif
 
 cpp: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
+	mkdir -p build
+	mv *.o cpp build
 
 clean:
-	rm -f *.o cpp
+	rm -rf build
 
 .PHONY: clean
