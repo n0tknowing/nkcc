@@ -102,8 +102,8 @@ void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp)
     uint lineno = 1;
     cpp_stream_push(ctx, file);
 
-    fputs("# 0 <built-in>\n", fp);
-    fputs("# 0 <command-line>\n", fp);
+    fputs("# 0 \"<built-in>\"\n", fp);
+    fputs("# 0 \"<command-line>\"\n", fp);
 
     while (1) {
         cpp_preprocess(ctx, &tk);
@@ -252,15 +252,14 @@ static uint join_tokens(cpp_token *tk, cpp_token **end, uchar end_kind,
     ushort i;
     uint len, off = 0;
 
-    do {
+    while (off < bufsz) {
         for (i = 0; i < tk->wscount; i++)
             buf[off++] = ' ';
-        if (off >= bufsz)
-            break;
         len = cpp_token_splice(tk, buf + off, MIN(bufsz - off, bufsz));
-        off += len;
-        tk++;
-    } while (tk->kind != TK_eof && tk->kind != end_kind);
+        off += len; tk++;
+        if (tk->kind == TK_eof || tk->kind == end_kind)
+            break;
+    }
 
     *end = tk;
     return off;
@@ -314,6 +313,55 @@ static void do_error(cpp_context *ctx, cpp_token *tk)
     cpp_error(ctx, &error_tk, "%s", (const char *)msg);
 }
 
+/* ---- #line ------------------------------------------------------------- */
+
+static void do_line(cpp_context *ctx, cpp_token *tk)
+{
+    const uchar *fname;
+    unsigned long val;
+    cpp_token line_tk, *tok;
+    uint len, max = sizeof("2147483648");
+    uchar buf[PATH_MAX + 1] = {0}, *end = NULL;
+
+    line_tk = *tk;
+    cpp_next(ctx, tk);
+    tok = expand_line(ctx, tk);
+
+    if (tok->kind != TK_number) {
+        if (tok->kind == '-' && tok[1].kind == TK_number)
+            cpp_error(ctx, &line_tk, "line number cannot be negative");
+        cpp_error(ctx, &line_tk, "missing line number");
+    }
+
+    len = cpp_token_splice(tok, buf, max + 1);
+    if (len > max)
+        cpp_error(ctx, &line_tk, "line number too large");
+
+    tok++;
+    buf[len] = 0;
+
+    val = strtoul((const char *)buf, (char **)&end, 10);
+    if (val == 0 && errno == 0)
+        cpp_error(ctx, &line_tk, "line number cannot be zero");
+    else if (val > INT_MAX)
+        cpp_error(ctx, &line_tk, "line number too large");
+
+    ctx->stream->pplineno = val;
+
+    if (tok->kind == TK_eof)
+        return;
+    else if (tok->kind != TK_string)
+        cpp_error(ctx, &line_tk, "filename must be string literal");
+
+    len = cpp_token_splice(tok, buf, PATH_MAX);
+    buf[len-1] = 0;
+    fname = buf; fname++; tok++;
+    ctx->stream->ppfname = (const char *)cpp_buffer_append(ctx, fname, len);
+
+    if (tok->kind != TK_eof)
+        cpp_error(ctx, &line_tk, "stray token after #line");
+}
+
 /* ---- #include stuff ---------------------------------------------------- */
 
 static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
@@ -321,7 +369,8 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     cpp_stream *s = malloc(sizeof(cpp_stream));
     assert(s);
     s->flags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
-    s->lineno = s->pplineno = 1;
+    s->pplineno = 0;
+    s->lineno = 1;
     s->p = file->data;
     s->fname = s->ppfname = file->name;
     s->file = file;
@@ -727,7 +776,9 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         len = snprintf(buf, sizeof(buf), "\"%s\"", ctx->stream->ppfname);
         macro_tk->kind = TK_string;
     } else if (name == g__LINE__) {
-        len = snprintf(buf, sizeof(buf), "%d", ctx->stream->lineno);
+        len = snprintf(buf, sizeof(buf), "%d", ctx->stream->pplineno ?
+                                               ctx->stream->pplineno :
+                                               ctx->stream->lineno);
         macro_tk->kind = TK_number;
     } else if (name == g__COUNTER__) {
         len = snprintf(buf, sizeof(buf), "%d", ctx->ppcounter++);
@@ -1042,7 +1093,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
         ms->tok.tokens[0].flags |= CPP_TOKEN_BOL;
     if (HAS_FLAG(macro_tk.flags, CPP_TOKEN_ESCNL))
         ms->tok.tokens[0].flags |= CPP_TOKEN_ESCNL;
-
     ms->tok.tokens[0].wscount = macro_tk.wscount;
     ms->tok.tokens[0].lineno = macro_tk.lineno;
     return 1;
@@ -1258,8 +1308,10 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
         case CPP_DIR_UNDEF:
             do_undef(ctx, tk);
             break;
-        case CPP_DIR_PRAGMA:
         case CPP_DIR_LINE:
+            do_line(ctx, tk);
+            break;
+        case CPP_DIR_PRAGMA:
             skip_line(ctx, tk);
             break;
         case CPP_DIR_ERROR:

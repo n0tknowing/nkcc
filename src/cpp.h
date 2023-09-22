@@ -246,15 +246,34 @@ typedef struct arg_stream {
     struct arg_stream *prev;
 } arg_stream;
 
+/*
+ * `ts` is the token array after preprocessing a file, used by later phases.
+ * `temp` is token array for backtrack.
+ * `line` is token array for expanding macros in #if/#elif/#line/#include.
+ *        unlike macro expansion in `file_macro` and `argstream`, it's
+ *        recycled.
+ * `stream` is the file stream that's being preprocessed.
+ * `file_macro` is where all macros expanded in a translation unit.
+ * `argstream` is a fake stream that's used when expanding a macro argument.
+ * `macro` is where all macros in a translation unit defined.
+ * `cached_file` is used to store cpp_file that's not guarded either by header
+ *               guard or #pragma once, so we can avoid reading the same file.
+ *               a guarded file will never be cached.
+ * `buf` is dynamic buffer, used to store temporary token pointer.
+ * `ppdate` is the cached value of __DATE__ macro.
+ * `pptime` is the cached value of __TIME__ macro.
+ * `ppcounter` is the counter value of __COUNTER__ macro. it keeps increasing
+ *             and never reset.
+ */
 typedef struct {
     cpp_token_array ts;
-    cpp_token_array temp; /* for backtrack */
-    cpp_token_array line; /* for #if/#elif/#line/#include */
+    cpp_token_array temp;
+    cpp_token_array line;
     cpp_stream *stream;
     macro_stack *file_macro;
     arg_stream *argstream;
-    ht_t macro; /* key=string_ref, val=cpp_macro* */
-    ht_t cached_file; /* key=cpp_file::path, val=cpp_file* */
+    ht_t macro;
+    ht_t cached_file;
     cpp_buffer *buf;
     const uchar *ppdate;
     const uchar *pptime;
