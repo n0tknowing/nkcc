@@ -1,5 +1,12 @@
 /* Current issues:
- * - Token spacing
+ * - Token spacing.
+ * - How to incrementing cpp_stream::pplineno?
+ * - I'm not satisfied with the current implementation of builtin_macro_setup()
+ *   and expand_builtin().
+ * - Should TK_placemarker be used instead?
+ * - Printing current file doesn't seem to be right. Especially when #include
+ *   is used.
+ * - Diagnostic is sucks.
  */
 #include "cpp.h"
 
@@ -692,8 +699,8 @@ static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
     return n;
 }
 
-static void parse_macro_arg(cpp_context *ctx, cpp_token *tk, string_ref param,
-                            ht_t *args)
+static void parse_macro_arg(cpp_context *ctx, string_ref param, ht_t *args,
+                            cpp_token *tk, string_ref name)
 {
     uchar kind;
     int paren = 0;
@@ -706,7 +713,8 @@ static void parse_macro_arg(cpp_context *ctx, cpp_token *tk, string_ref param,
             break;
         } else if (tk->kind == TK_eof) {
             hash_table_cleanup_with_free(args, macro_arg_free);
-            cpp_error(ctx, tk, "unexpected end of file");
+            cpp_error(ctx, tk, "unexpected end of file while parsing macro "
+                               "arguments of '%s'\n", string_ref_ptr(name));
         }
         if (tk->kind == '(')
             paren++;
@@ -745,7 +753,7 @@ static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
             }
             cpp_next_nonl(ctx, tk);
         }
-        parse_macro_arg(ctx, tk, param[i++], args);
+        parse_macro_arg(ctx, param[i++], args, tk, m->name);
         first = 0;
     }
 
@@ -869,7 +877,9 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
 static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
                       cpp_token_array *_is)
 {
+    uint i, len;
     cpp_token tmp;
+    uchar buf[4096];
     uchar first = 1;
     cpp_stream stream;
     const cpp_token *is = _is->tokens;
@@ -878,19 +888,17 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
     while (is->kind != TK_eof) {
         if (!first && (is->wscount > 0 || HAS_FLAG(is->flags, CPP_TOKEN_BOL)))
             cpp_buffer_append_ch(ctx, ' ');
-        first = 0;
+        len = cpp_token_splice(is, buf, sizeof(buf));
         if (is->kind == TK_string || is->kind == TK_char_const) {
-            uint i;
-            const uchar *tp = is->p;
-            for (i = 0; i < is->length; i++) {
-                if (tp[i] == '"' || tp[i] == '\\')
+            for (i = 0; i < len; i++) {
+                if (buf[i] == '"' || buf[i] == '\\')
                     cpp_buffer_append_ch(ctx, '\\');
-                cpp_buffer_append_ch(ctx, tp[i]);
+                cpp_buffer_append_ch(ctx, buf[i]);
             }
         } else {
-            cpp_buffer_append(ctx, is->p, is->length);
+            cpp_buffer_append(ctx, buf, len);
         }
-        is++;
+        first = 0; is++;
     }
 
     cpp_buffer_append_ch(ctx, '"');
