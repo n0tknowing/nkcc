@@ -1,5 +1,5 @@
 /* Current issues:
- * 
+ * - Token spacing
  */
 #include "cpp.h"
 
@@ -1042,10 +1042,24 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 
         /* Need to suppress macro expansion. */
         if (arg != NULL && is[1].kind == TK_paste) {
+            cpp_token *rhs = is + 2;
             cpp_token *is2 = arg->body.tokens;
-            while (is2->kind != TK_eof)
-                cpp_token_array_append(os, is2++);
-            is++; /* Handle ## in the next iteration */
+            if (is2->kind == TK_eof) {
+                /* lhs is empty, we don't need to paste it */
+                cpp_macro_arg *arg2 = find_arg(args, rhs);
+                if (arg2 != NULL) {
+                    is2 = arg2->body.tokens;
+                    while (is2->kind != TK_eof)
+                        cpp_token_array_append(os, is2++);
+                } else {
+                    cpp_token_array_append(os, rhs);
+                }
+                is += 3;
+            } else {
+                while (is2->kind != TK_eof)
+                    cpp_token_array_append(os, is2++);
+                is++; /* Handle ## in the next iteration */
+            }
             continue;
         }
 
