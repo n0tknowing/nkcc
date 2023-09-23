@@ -659,7 +659,7 @@ static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
         if (n == cap) {
             if (cap != 0) {
                 cap *= 2;
-                p = realloc(p, cap);
+                p = realloc(p, cap * sizeof(string_ref));
                 assert(p);
             } else {
                 cap = 4;
