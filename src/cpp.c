@@ -114,28 +114,20 @@ void cpp_run(cpp_context *ctx, cpp_file *file)
 void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp)
 {
     cpp_token tk;
-    int delta, i;
-    uint lineno = 1;
+    uchar first = 1;
     cpp_stream_push(ctx, file);
 
     while (1) {
         cpp_preprocess(ctx, &tk);
         if (tk.kind == TK_eof)
             break;
-        if (HAS_FLAG(tk.flags, CPP_TOKEN_BOL)) {
-            delta = (int)tk.lineno - (int)lineno;
-            if (delta > 0 && delta < 6) {
-                for (i = 0; i < delta; i++)
-                    fputc('\n', fp);
-            } else {
-                fputc('\n', fp);
-            }
-            lineno = tk.lineno;
-        }
+        if (AT_BOL(&tk) && !first)
+            fputc('\n', fp);
         cpp_token_print(fp, &tk);
+        first = 0;
     }
 
-    if (tk.lineno > 1)
+    if (!first)
         fputc('\n', fp);
 }
 
@@ -369,7 +361,7 @@ static void do_line(cpp_context *ctx, cpp_token hash, cpp_token *tk)
         cpp_error(ctx, &hash, "filename must be string literal");
 
     len = cpp_token_splice(tok, buf, PATH_MAX);
-    buf[len-1] = 0;
+    buf[len - 1] = 0;
     fname = buf; fname++; tok++;
     ctx->stream->ppfname = (const char *)cpp_buffer_append(ctx, fname, len);
 
@@ -421,7 +413,7 @@ static uchar *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
 
     if (tok->kind == TK_string) {
         len = cpp_token_splice(tok, buf, PATH_MAX);
-        buf[len-1] = 0; path++; len -= 2;
+        buf[len - 1] = 0; path++; len -= 2;
         if (cwd) *cwd = ctx->stream->file->dirpath;
         tok++;
     } else if (tok->kind == '<') {
@@ -460,13 +452,13 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
 
     if (tk->kind == TK_string) {
         len = cpp_token_splice(tk, buf, PATH_MAX);
-        buf[len-1] = 0; path++; len -= 2;
+        buf[len - 1] = 0; path++; len -= 2;
         cwd = ctx->stream->file->dirpath;
         cpp_next(ctx, tk);
     } else if (tk->kind == '<') {
         cpp_lex_string(ctx->stream, tk, '>');
         len = cpp_token_splice(tk, buf, PATH_MAX);
-        buf[len-1] = 0; len--;
+        buf[len - 1] = 0; len--;
         cpp_next(ctx, tk);
     } else {
         if (tk->kind != TK_identifier)
@@ -882,7 +874,6 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
 
     if (!dt)
         macro_tk->p = cpp_buffer_append(ctx, (uchar *)buf, len);
-
     macro_tk->length = len;
     macro_tk->flags &= ~CPP_TOKEN_ESCNL;
 }
