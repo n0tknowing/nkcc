@@ -375,7 +375,7 @@ static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk)
 
     lndelta = tk->lineno - ctx->stream->pplineno_loc;
     lineno = ctx->stream->pplineno_val + lndelta;
-    return lineno > 1 ? lineno - 1 : lineno;
+    return ctx->stream->pplineno_val ? lineno - 1 : lineno;
 }
 
 /* ---- #include stuff ---------------------------------------------------- */
