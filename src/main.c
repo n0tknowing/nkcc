@@ -3,11 +3,12 @@
 static void usage(int exit_code)
 {
     puts("Usage:");
-    puts("  cpp [-E] [-o OUT_FILE] FILE");
+    puts("  cpp [-EP] [-o OUT_FILE] FILE");
     puts("");
     puts("Options:");
     puts("  -o OUT_FILE     Place the output into OUT_FILE");
     puts("  -E              Preprocess only");
+    puts("  -P              Disable linemarker output in -E mode");
     exit(exit_code);
 }
 
@@ -18,13 +19,15 @@ int main(int argc, char **argv)
     int opt, opt_e = 0;
     const char *in, *out = NULL;
 
-    while ((opt = getopt(argc, argv, ":Eo:")) != EOF) {
+    while ((opt = getopt(argc, argv, ":EPo:")) != EOF) {
         switch (opt) {
         case 'E':
             opt_e = 1;
             break;
         case 'o':
             out = optarg;
+            break;
+        case 'P':
             break;
         default:
             usage(1);
