@@ -232,7 +232,8 @@ typedef struct cpp_buffer {
 typedef struct cpp_stream {
     uchar flags;
     uint lineno;
-    uint pplineno;
+    uint pplineno_loc;
+    uint pplineno_val;
     const char *fname;
     const char *ppfname;
     const uchar *p;

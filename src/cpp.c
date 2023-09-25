@@ -1,12 +1,15 @@
 /* Current issues:
  * - Token spacing.
- * - How to incrementing cpp_stream::pplineno?
  * - I'm not satisfied with the current implementation of builtin_macro_setup()
- *   and expand_builtin().
+ *   and expand_builtin() because these don't handle non-dynamic builtin macros.
  * - Should TK_placemarker be used instead?
  * - Printing current file doesn't seem to be right. Especially when #include
  *   is used.
- * - Diagnostic is sucks.
+ * - Should not use fixed-size buffer when splicing a token.
+ * - Should the macro stuff has its own file? Preferably named macro.c
+ *
+ * Forever issues:
+ * - Diagnostic.
  */
 #include "cpp.h"
 
@@ -20,6 +23,7 @@ static void cond_stack_cleanup(cpp_context *ctx);
 static void macro_free(void *p);
 static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk);
 static uchar expand(cpp_context *ctx, cpp_token *tk);
+static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
 
 
 /* ------------------------------------------------------------------------ */
@@ -280,7 +284,8 @@ static void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->fname, tk->lineno);
+    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
+                                                get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;31merror:\x1b[0m ");
     vfprintf(stderr, s, ap);
     fputc('\n', stderr);
@@ -293,7 +298,8 @@ static void cpp_warn(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->fname, tk->lineno);
+    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
+                                                get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;35mwarning:\x1b[0m ");
     vfprintf(stderr, s, ap);
     fputc('\n', stderr);
@@ -324,43 +330,43 @@ static void do_error(cpp_context *ctx, cpp_token *tk)
 
 /* ---- #line ------------------------------------------------------------- */
 
-static void do_line(cpp_context *ctx, cpp_token *tk)
+static void do_line(cpp_context *ctx, cpp_token hash, cpp_token *tk)
 {
-    const uchar *fname;
+    cpp_token *tok;
     unsigned long val;
-    cpp_token line_tk, *tok;
+    const uchar *fname;
     uint len, max = sizeof("2147483648");
     uchar buf[PATH_MAX + 1] = {0}, *end = NULL;
 
-    line_tk = *tk;
     cpp_next(ctx, tk);
     tok = expand_line(ctx, tk);
 
     if (tok->kind != TK_number) {
         if (tok->kind == '-' && tok[1].kind == TK_number)
-            cpp_error(ctx, &line_tk, "line number cannot be negative");
-        cpp_error(ctx, &line_tk, "missing line number");
+            cpp_error(ctx, &hash, "line number cannot be negative");
+        cpp_error(ctx, &hash, "missing line number");
     }
 
     len = cpp_token_splice(tok, buf, max + 1);
     if (len > max)
-        cpp_error(ctx, &line_tk, "line number too large");
+        cpp_error(ctx, &hash, "line number too large");
 
     tok++;
     buf[len] = 0;
 
     val = strtoul((const char *)buf, (char **)&end, 10);
     if (val == 0 && errno == 0)
-        cpp_error(ctx, &line_tk, "line number cannot be zero");
+        cpp_error(ctx, &hash, "line number cannot be zero");
     else if (val > INT_MAX)
-        cpp_error(ctx, &line_tk, "line number too large");
+        cpp_error(ctx, &hash, "line number too large");
 
-    ctx->stream->pplineno = val;
+    ctx->stream->pplineno_loc = hash.lineno;
+    ctx->stream->pplineno_val = val;
 
     if (tok->kind == TK_eof)
         return;
     else if (tok->kind != TK_string)
-        cpp_error(ctx, &line_tk, "filename must be string literal");
+        cpp_error(ctx, &hash, "filename must be string literal");
 
     len = cpp_token_splice(tok, buf, PATH_MAX);
     buf[len-1] = 0;
@@ -368,7 +374,16 @@ static void do_line(cpp_context *ctx, cpp_token *tk)
     ctx->stream->ppfname = (const char *)cpp_buffer_append(ctx, fname, len);
 
     if (tok->kind != TK_eof)
-        cpp_error(ctx, &line_tk, "stray token after #line");
+        cpp_error(ctx, &hash, "stray token after #line");
+}
+
+static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk)
+{
+    uint lineno, lndelta;
+
+    lndelta = tk->lineno - ctx->stream->pplineno_loc;
+    lineno = ctx->stream->pplineno_val + lndelta;
+    return lineno > 1 ? lineno - 1 : lineno;
 }
 
 /* ---- #include stuff ---------------------------------------------------- */
@@ -378,7 +393,7 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     cpp_stream *s = malloc(sizeof(cpp_stream));
     assert(s);
     s->flags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
-    s->pplineno = 0;
+    s->pplineno_loc = s->pplineno_val = 0;
     s->lineno = 1;
     s->p = file->data;
     s->fname = s->ppfname = file->name;
@@ -807,9 +822,7 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         len = snprintf(buf, sizeof(buf), "\"%s\"", ctx->stream->ppfname);
         macro_tk->kind = TK_string;
     } else if (name == g__LINE__) {
-        len = snprintf(buf, sizeof(buf), "%d", ctx->stream->pplineno ?
-                                               ctx->stream->pplineno :
-                                               ctx->stream->lineno);
+        len = snprintf(buf, sizeof(buf), "%u", get_lineno_tok(ctx, macro_tk));
         macro_tk->kind = TK_number;
     } else if (name == g__COUNTER__) {
         len = snprintf(buf, sizeof(buf), "%d", ctx->ppcounter++);
@@ -905,7 +918,8 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
 
     stream.flags = 0;
     stream.lineno = ctx->stream->lineno;
-    stream.pplineno = ctx->stream->pplineno;
+    stream.pplineno_loc = ctx->stream->pplineno_loc;
+    stream.pplineno_val = ctx->stream->pplineno_val;
     stream.fname = ctx->stream->fname;
     stream.ppfname = ctx->stream->ppfname;
     stream.file = ctx->stream->file;
@@ -936,7 +950,8 @@ static void paste(cpp_context *ctx, cpp_token_array *os, cpp_token *rhs,
 
     stream.flags = 0;
     stream.lineno = ctx->stream->lineno;
-    stream.pplineno = ctx->stream->pplineno;
+    stream.pplineno_loc = ctx->stream->pplineno_loc;
+    stream.pplineno_val = ctx->stream->pplineno_val;
     stream.fname = ctx->stream->fname;
     stream.ppfname = ctx->stream->ppfname;
     stream.p = cpp_buffer_append(ctx, (const uchar *)buf3, n + 1);
@@ -1367,7 +1382,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             do_undef(ctx, tk);
             break;
         case CPP_DIR_LINE:
-            do_line(ctx, tk);
+            do_line(ctx, hash, tk);
             break;
         case CPP_DIR_PRAGMA:
             skip_line(ctx, tk);
