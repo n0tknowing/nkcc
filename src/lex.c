@@ -321,6 +321,7 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
             CHECK_ESCNL(s, tk);
             if (!isdigit(*s->p))
                 break;
+            s->p++;
         } else if (tolower(*s->p) == 'e' || tolower(*s->p) == 'p') {
             tk->flags |= CPP_TOKEN_FLNUM;
             s->p++;
@@ -329,8 +330,9 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
                 s->p++;
         } else if (!isalnum(*s->p)) {
             break;
+        } else {
+            s->p++;
         }
-        s->p++;
     }
 
     tk->length = (uint)(s->p - tk->p);
