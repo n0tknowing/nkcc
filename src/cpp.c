@@ -710,6 +710,7 @@ static void parse_macro_arg(cpp_context *ctx, string_ref param, ht_t *args,
                             cpp_token *tk, string_ref name)
 {
     uchar kind;
+    uint length;
     int paren = 0;
     cpp_macro_arg *arg = macro_arg_new(param);
 
@@ -735,21 +736,19 @@ static void parse_macro_arg(cpp_context *ctx, string_ref param, ht_t *args,
         cpp_next_nonl(ctx, tk);
     }
 
-    kind = tk->kind;
-    tk->kind = TK_eof;
-    tk->length = 0;
+    kind = tk->kind; length = tk->length;
+    tk->kind = TK_eof; tk->length = 0;
     cpp_token_array_append(&arg->body, tk);
-    tk->kind = kind;
-
+    tk->kind = kind; tk->length = length;
     hash_table_insert(args, param, arg);
 }
 
 static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
                          ht_t *args)
 {
-    uchar first = 1;
     string_ref *param = m->param;
     uint i = 0, n_param = m->n_param;
+    uchar first = 1, empty_va_arg = 0;
 
     hash_table_setup(args, n_param);
     cpp_next_nonl(ctx, tk);
@@ -757,6 +756,10 @@ static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
     while (i < n_param) {
         if (!first) {
             if (tk->kind != ',') {
+                if (param[i] == g__VA_ARGS__ && tk->kind == ')') {
+                    empty_va_arg = 1;
+                    break;
+                }
                 hash_table_cleanup_with_free(args, macro_arg_free);
                 cpp_error(ctx, tk, "too few arguments for macro '%s'",
                                     string_ref_ptr(m->name));
@@ -767,7 +770,13 @@ static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
         first = 0;
     }
 
-    if (tk->kind != ')') {
+    if (empty_va_arg) {
+        cpp_macro_arg *arg = macro_arg_new(g__VA_ARGS__);
+        tk->kind = TK_eof; tk->length = 0;
+        cpp_token_array_append(&arg->body, tk);
+        tk->kind = ')'; tk->length = 1;
+        hash_table_insert(args, g__VA_ARGS__, arg);
+    } else if (tk->kind != ')') {
         hash_table_cleanup_with_free(args, macro_arg_free);
         cpp_error(ctx, tk, "too many arguments for macro '%s'",
                             string_ref_ptr(m->name));
@@ -778,30 +787,6 @@ static const char *month[] = {
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 };
-
-static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk)
-{
-    uchar kind;
-    cpp_token_array_clear(&ctx->line);
-
-    while (1) {
-        if (tk->kind == '\n' || tk->kind == TK_eof)
-            break;
-        else if (tk->kind == TK_identifier && expand(ctx, tk))
-            ;
-        else
-            cpp_token_array_append(&ctx->line, tk);
-        cpp_next(ctx, tk);
-    }
-
-    kind = tk->kind;
-    tk->kind = TK_eof;
-    cpp_token_array_append(&ctx->line, tk);
-    tk->kind = kind;
-
-    assert(ctx->file_macro == NULL);
-    return ctx->line.tokens;
-}
 
 static void expand_builtin(cpp_context *ctx, string_ref name,
                            cpp_token *macro_tk)
@@ -881,6 +866,30 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
     macro_tk->flags &= ~CPP_TOKEN_ESCNL;
 }
 
+static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk)
+{
+    uchar kind;
+    cpp_token_array_clear(&ctx->line);
+
+    while (1) {
+        if (tk->kind == '\n' || tk->kind == TK_eof)
+            break;
+        else if (tk->kind == TK_identifier && expand(ctx, tk))
+            ;
+        else
+            cpp_token_array_append(&ctx->line, tk);
+        cpp_next(ctx, tk);
+    }
+
+    kind = tk->kind;
+    tk->kind = TK_eof;
+    cpp_token_array_append(&ctx->line, tk);
+    tk->kind = kind;
+
+    assert(ctx->file_macro == NULL);
+    return ctx->line.tokens;
+}
+
 static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
                       cpp_token_array *_is)
 {
@@ -888,7 +897,7 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
     cpp_token tmp;
     uchar buf[4096];
     uchar first = 1;
-    cpp_stream stream;
+    cpp_stream stream; /* fake stream */
     const cpp_token *is = _is->tokens;
     const uchar *p = cpp_buffer_append_ch(ctx, '"');
 
@@ -1034,17 +1043,24 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
         if (is->kind == TK_paste) {
             cpp_macro_arg *arg = find_arg(args, ++is);
             if (arg != NULL) {
+                uchar pasted = 0;
                 cpp_token *is2 = arg->body.tokens;
-                if (is2->kind == TK_eof)
+                if (is2->kind == TK_eof) {
                     ;
-                else if (os->n == 0)
+                } else if (os->n == 0) {
                     cpp_token_array_append(os, is2++);
-                else
+                } else {
+                    pasted = 1;
                     paste(ctx, os, is2++, macro_tk);
+                }
+                if (pasted && !PREV_SPACE(is2))
+                    is2->flags |= CPP_TOKEN_SPACE;
                 while (is2->kind != TK_eof)
                     cpp_token_array_append(os, is2++);
             } else {
                 paste(ctx, os, is, macro_tk);
+                if (!PREV_SPACE(&is[1]))
+                    is[1].flags |= CPP_TOKEN_SPACE;
             }
             is++;
             continue;
@@ -1183,7 +1199,6 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
                 cpp_token_array_cleanup(&body);
                 cpp_error(ctx, tk, "'#' is not followed by a macro parameter");
             }
-            cpp_token_array_append(&body, tk); /* append param */
         } else if (tk->kind == TK_paste) {
             if (body.n == 0) {
                 free(param);
@@ -1197,10 +1212,8 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
                 cpp_token_array_cleanup(&body);
                 cpp_error(ctx, tk, "'##' cannot appear at either end of replacement list");
             }
-            cpp_token_array_append(&body, tk); /* append rhs */
-        } else {
-            cpp_token_array_append(&body, tk);
         }
+        cpp_token_array_append(&body, tk);
         cpp_next(ctx, tk);
     }
 
