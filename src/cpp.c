@@ -2,7 +2,6 @@
  * - Token spacing.
  * - I'm not satisfied with the current implementation of builtin_macro_setup()
  *   and expand_builtin() because these don't handle non-dynamic builtin macros.
- * - Should TK_placemarker be used instead?
  * - Printing current file doesn't seem to be right. Especially when #include
  *   is used.
  * - Should not use fixed-size buffer when splicing a token.
