@@ -42,12 +42,11 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
 
 void cpp_token_print(FILE *fp, cpp_token *tk)
 {
-    uint i;
+    uint i = 0;
     uchar buf[1024] = {0};
 
-    for (i = 0; i < tk->wscount; i++)
-        buf[i] = ' ';
-
+    if (PREV_SPACE(tk))
+        buf[i++] = ' ';
     fwrite(buf, 1, i, fp);
 
     if (tk->kind < 128) {

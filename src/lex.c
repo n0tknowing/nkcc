@@ -345,7 +345,6 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
     tk->flags = s->flags;
     s->flags = 0;
-    tk->wscount = 0;
     tk->fileno = s->file->id;
 
     while (*s->p) {
@@ -360,11 +359,12 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
             /* special line continuation handling */
             if (s->p[1] == '\\' && s->p[2] == '\n' &&
                (s->p[3] == '/' || s->p[3] == '*')) {
-                s->p++;
-                s->lineno++;
+                s->p++; s->lineno++;
+                tk->flags |= CPP_TOKEN_SPACE;
                 cpp_lex_comment(s, s->p[2]);
                 continue;
             } else if (s->p[1] == '/' || s->p[1] == '*') {
+                tk->flags |= CPP_TOKEN_SPACE;
                 cpp_lex_comment(s, s->p[1]);
                 continue;
             }
@@ -374,16 +374,14 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         if (*s->p == '\n') {
             s->p++; tk->lineno = s->lineno++;
             s->flags = tk->flags | CPP_TOKEN_BOL;
+            s->flags &= ~CPP_TOKEN_SPACE;
             tk->kind = '\n'; tk->length = 0;
             return;
         }
 
         /* whitespace */
         if (isspace(*s->p)) {
-            /* convert tab into 2 spaces */
-            if (*s->p == '\t')
-                tk->wscount++;
-            tk->wscount++;
+            tk->flags |= CPP_TOKEN_SPACE;
             s->p++;
             continue;
         }

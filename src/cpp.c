@@ -7,6 +7,7 @@
  *   is used.
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
+ * - __COUNTER__ is not handled correctly.
  *
  * Forever issues:
  * - Diagnostic.
@@ -258,7 +259,7 @@ static uint join_tokens(cpp_token *tk, cpp_token **end, uchar end_kind,
     uint len, off = 0;
 
     while (off < bufsz) {
-        for (i = 0; i < tk->wscount; i++)
+        if (PREV_SPACE(tk))
             buf[off++] = ' ';
         len = cpp_token_splice(tk, buf + off, MIN(bufsz - off, bufsz));
         off += len; tk++;
@@ -309,7 +310,7 @@ static void do_error(cpp_context *ctx, cpp_token *tk)
     cpp_next(ctx, tk);
 
     while (tk->kind != '\n' && tk->kind != TK_eof) {
-        if (tk->wscount > 0)
+        if (PREV_SPACE(tk))
             cpp_buffer_append_ch(ctx, ' ');
         len = cpp_token_splice(tk, buf, sizeof(buf));
         cpp_buffer_append(ctx, buf, len);
@@ -727,7 +728,10 @@ static void parse_macro_arg(cpp_context *ctx, string_ref param, ht_t *args,
             paren++;
         else if (tk->kind == ')')
             paren--;
-        tk->wscount = !!tk->wscount;
+        if (AT_BOL(tk)) {
+            tk->flags &= ~CPP_TOKEN_BOL;
+            tk->flags |= CPP_TOKEN_SPACE;
+        }
         cpp_token_array_append(&arg->body, tk);
         cpp_next_nonl(ctx, tk);
     }
@@ -817,7 +821,7 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         len = snprintf(buf, sizeof(buf), "%u", get_lineno_tok(ctx, macro_tk));
         macro_tk->kind = TK_number;
     } else if (name == g__COUNTER__) {
-        len = snprintf(buf, sizeof(buf), "%d", ctx->ppcounter++);
+        len = snprintf(buf, sizeof(buf), "%u", ctx->ppcounter++);
         macro_tk->kind = TK_number;
     } else if (name == g__BASE_FILE__) {
         cpp_stream *s = ctx->stream;
@@ -890,7 +894,7 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
     const uchar *p = cpp_buffer_append_ch(ctx, '"');
 
     while (is->kind != TK_eof) {
-        if (!first && (is->wscount > 0 || HAS_FLAG(is->flags, CPP_TOKEN_BOL)))
+        if (!first && PREV_SPACE(is))
             cpp_buffer_append_ch(ctx, ' ');
         len = cpp_token_splice(is, buf, sizeof(buf));
         if (is->kind == TK_string || is->kind == TK_char_const) {
@@ -919,22 +923,22 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
     stream.prev = NULL;
 
     cpp_lex_scan(&stream, &tmp);
-    tmp.wscount = !!arg_tk->wscount;
-
+    if (PREV_SPACE(arg_tk))
+        tmp.flags |= CPP_TOKEN_SPACE;
     cpp_token_array_append(os, &tmp);
 }
 
 static void paste(cpp_context *ctx, cpp_token_array *os, cpp_token *rhs,
                   cpp_token *macro_tk)
 {
-    ushort wscount;
+    uchar prev_space;
     int len, len2, n;
     cpp_stream stream; /* fake stream */
     cpp_token tmp, *lhs;
     char buf[1024], buf2[1024], buf3[2049] = {0};
 
     lhs = &os->tokens[os->n - 1];
-    wscount = !!lhs->wscount;
+    prev_space = PREV_SPACE(lhs);
     len = (int)cpp_token_splice(lhs, (uchar *)buf, sizeof(buf));
     len2 = (int)cpp_token_splice(rhs, (uchar *)buf2, sizeof(buf2));
     n = snprintf(buf3, 2048, "%.*s%.*s", len, buf, len2, buf2);
@@ -955,7 +959,8 @@ static void paste(cpp_context *ctx, cpp_token_array *os, cpp_token *rhs,
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
 
     *lhs = tmp;
-    lhs->wscount = wscount;
+    if (prev_space)
+        lhs->flags |= CPP_TOKEN_SPACE;
 
     cpp_lex_scan(&stream, &tmp);
     if (tmp.kind != TK_eof)
@@ -994,14 +999,8 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
         }
     }
 
-    if (i < os->n) {
-        if (HAS_FLAG(param_tk->flags, CPP_TOKEN_BOL))
-            os->tokens[i].flags |= CPP_TOKEN_BOL;
-        if (HAS_FLAG(param_tk->flags, CPP_TOKEN_ESCNL))
-            os->tokens[i].flags |= CPP_TOKEN_ESCNL;
-        os->tokens[i].wscount = param_tk->wscount;
-        os->tokens[i].lineno = param_tk->lineno;
-    }
+    if (i < os->n)
+        os->tokens[i].flags |= param_tk->flags;
 
     arg_stream_pop(ctx);
 }
@@ -1054,37 +1053,37 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 
         cpp_macro_arg *arg = find_arg(args, is);
 
-        /* Need to suppress macro expansion. */
-        if (arg != NULL && is[1].kind == TK_paste) {
-            cpp_token *rhs = is + 2;
-            cpp_token *is2 = arg->body.tokens;
-            if (is2->kind == TK_eof) {
-                /* lhs is empty, we don't need to paste it */
-                cpp_macro_arg *arg2 = find_arg(args, rhs);
-                if (arg2 != NULL) {
-                    is2 = arg2->body.tokens;
+        if (arg != NULL) { /* We found a parameter and its arguments */
+            if (is[1].kind == TK_paste) {
+                /* Need to suppress macro expansion */
+                cpp_token *rhs = is + 2;
+                cpp_token *is2 = arg->body.tokens;
+                if (is2->kind == TK_eof) {
+                    /* lhs is empty, we don't need to paste it */
+                    cpp_macro_arg *arg2 = find_arg(args, rhs);
+                    if (arg2 != NULL) {
+                        is2 = arg2->body.tokens;
+                        while (is2->kind != TK_eof)
+                            cpp_token_array_append(os, is2++);
+                    } else {
+                        cpp_token_array_append(os, rhs);
+                    }
+                    is += 3;
+                } else {
                     while (is2->kind != TK_eof)
                         cpp_token_array_append(os, is2++);
-                } else {
-                    cpp_token_array_append(os, rhs);
+                    is++; /* Handle ## in the next iteration */
                 }
-                is += 3;
             } else {
-                while (is2->kind != TK_eof)
-                    cpp_token_array_append(os, is2++);
-                is++; /* Handle ## in the next iteration */
+                /* Handle argument */
+                expand_arg(ctx, arg, os, is++);
             }
-            continue;
-        }
-
-        /* Handle argument. */
-        if (arg != NULL) {
-            expand_arg(ctx, arg, os, is++);
             continue;
         }
 
         /* Remaining token from the replacement list. */
         is->flags &= ~CPP_TOKEN_BOL;
+        is->lineno = macro_tk->lineno;
         cpp_token_array_append(os, is++);
     }
 
@@ -1138,11 +1137,7 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
     assert(ms);
     ms->p = ms->tok.tokens;
 
-    if (HAS_FLAG(macro_tk.flags, CPP_TOKEN_BOL))
-        ms->tok.tokens[0].flags |= CPP_TOKEN_BOL;
-    if (HAS_FLAG(macro_tk.flags, CPP_TOKEN_ESCNL))
-        ms->tok.tokens[0].flags |= CPP_TOKEN_ESCNL;
-    ms->tok.tokens[0].wscount = macro_tk.wscount;
+    ms->tok.tokens[0].flags |= macro_tk.flags;
     ms->tok.tokens[0].lineno = macro_tk.lineno;
     return 1;
 }
@@ -1172,7 +1167,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
     m2 = hash_table_lookup(&ctx->macro, name);
     cpp_next(ctx, tk);
 
-    if (tk->kind == '(' && tk->wscount == 0) {
+    if (tk->kind == '(' && !PREV_SPACE(tk)) {
         n_param = parse_macro_param(ctx, tk, &param);
         flags = CPP_MACRO_FUNC;
     }
@@ -1181,7 +1176,6 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
 
     while (tk->kind != '\n' && tk->kind != TK_eof) {
         tk->flags &= ~CPP_TOKEN_BOL;
-        tk->wscount = !!tk->wscount;
         if (tk->kind == '#' && HAS_FLAG(flags, CPP_MACRO_FUNC)) {
             cpp_token_array_append(&body, tk); /* append # */
             cpp_next(ctx, tk);
@@ -1223,11 +1217,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
     if (m2 != NULL)
         cpp_warn(ctx, tk, "'%s' redefined", string_ref_ptr(name));
 
-    if (!HAS_FLAG(flags, CPP_MACRO_FUNC)) {
-        if (body.n > 1 && body.tokens[0].wscount == 0)
-            cpp_warn(ctx, tk, "no whitespace after macro name");
-    }
-
+    body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
     hash_table_insert(&ctx->macro, name, m);
 }
 

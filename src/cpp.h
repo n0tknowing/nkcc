@@ -26,6 +26,7 @@
 #define MAX(x, y)      ((x) > (y) ? (x) : (y))
 #define HAS_FLAG(x, y) (((x) & (y)) == (y))
 #define AT_BOL(_t)     (HAS_FLAG((_t)->flags, CPP_TOKEN_BOL))
+#define PREV_SPACE(_t) (HAS_FLAG((_t)->flags, CPP_TOKEN_SPACE))
 #define LITREF(x)      string_ref_newlen((x), sizeof((x)) - 1)
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -61,6 +62,7 @@ typedef unsigned int tkchar;
 #define CPP_TOKEN_NOEXPAND  4 /* token is macro and cannot be expanded again */
 #define CPP_TOKEN_ESCNL     8 /* there is "\\\n" in the token */
 #define CPP_TOKEN_FLNUM    16 /* token is floating constant */
+#define CPP_TOKEN_SPACE    32 /* token is followed by whitespace */
 
 /* flags for cond_stack */
 #define CPP_COND_ELSIF      1 /* this branch has #elif/#else */
@@ -181,8 +183,7 @@ typedef struct {
 
 typedef struct {
     uchar kind;
-    uchar flags;
-    ushort wscount;
+    ushort flags;
     ushort fileno;
     uint lineno;
     uint length;
