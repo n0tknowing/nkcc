@@ -38,7 +38,6 @@ static string_ref g__VA_ARGS__,
                   g__TIMESTAMP__,
                   g_defined;
 
-
 /* ------------------------------------------------------------------------ */
 
 void cpp_context_setup(cpp_context *ctx)
@@ -322,7 +321,7 @@ static void do_error(cpp_context *ctx, cpp_token *tk)
 
 /* ---- #line ------------------------------------------------------------- */
 
-static void do_line(cpp_context *ctx, cpp_token hash, cpp_token *tk)
+static void do_line(cpp_context *ctx, cpp_token *tk)
 {
     cpp_token *tok;
     unsigned long val;
@@ -335,38 +334,41 @@ static void do_line(cpp_context *ctx, cpp_token hash, cpp_token *tk)
 
     if (tok->kind != TK_number) {
         if (tok->kind == '-' && tok[1].kind == TK_number)
-            cpp_error(ctx, &hash, "line number cannot be negative");
-        cpp_error(ctx, &hash, "missing line number");
+            cpp_error(ctx, tok, "line number cannot be negative");
+        cpp_error(ctx, tok, "missing line number");
     }
 
     len = cpp_token_splice(tok, buf, max + 1);
     if (len > max)
-        cpp_error(ctx, &hash, "line number too large");
+        cpp_error(ctx, tok, "line number too large");
 
     tok++;
     buf[len] = 0;
 
     val = strtoul((const char *)buf, (char **)&end, 10);
     if (val == 0 && errno == 0)
-        cpp_error(ctx, &hash, "line number cannot be zero");
+        cpp_error(ctx, tok, "line number cannot be zero");
     else if (val > INT_MAX)
-        cpp_error(ctx, &hash, "line number too large");
-
-    ctx->stream->pplineno_loc = hash.lineno;
-    ctx->stream->pplineno_val = val;
+        cpp_error(ctx, tok, "line number too large");
+    else if (end != NULL && *end != '\0')
+        cpp_error(ctx, tok, "#line requires a simple digit sequence");
 
     if (tok->kind == TK_eof)
-        return;
+        goto done;
     else if (tok->kind != TK_string)
-        cpp_error(ctx, &hash, "filename must be string literal");
+        cpp_error(ctx, tok, "filename must be string literal");
 
     len = cpp_token_splice(tok, buf, PATH_MAX);
     buf[len - 1] = 0;
     fname = buf; fname++; tok++;
-    ctx->stream->ppfname = (const char *)cpp_buffer_append(ctx, fname, len);
 
     if (tok->kind != TK_eof)
-        cpp_error(ctx, &hash, "stray token after #line");
+        cpp_error(ctx, tok, "stray token after #line");
+
+done:
+    ctx->stream->pplineno_loc = tok->lineno;
+    ctx->stream->pplineno_val = val;
+    ctx->stream->ppfname = (const char *)cpp_buffer_append(ctx, fname, len);
 }
 
 static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk)
@@ -1375,7 +1377,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             do_undef(ctx, tk);
             break;
         case CPP_DIR_LINE:
-            do_line(ctx, hash, tk);
+            do_line(ctx, tk);
             break;
         case CPP_DIR_PRAGMA:
             skip_line(ctx, tk);
