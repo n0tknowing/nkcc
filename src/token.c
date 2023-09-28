@@ -40,7 +40,23 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
     return i ? j : len;
 }
 
-void cpp_token_print(FILE *fp, cpp_token *tk)
+string_ref cpp_token_intern_id(const cpp_token *tk)
+{
+    string_ref id;
+    uchar buf[1024];
+    uint len = tk->length;
+
+    if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
+        len = cpp_token_splice(tk, buf, sizeof(buf));
+        id = string_ref_newlen((const char *)buf, len);
+    } else {
+        id = string_ref_newlen((const char *)tk->p, len);
+    }
+
+    return id;
+}
+
+void cpp_token_print(FILE *fp, const cpp_token *tk)
 {
     uint i = 0;
     uchar buf[1024] = {0};
@@ -91,7 +107,7 @@ void cpp_token_array_move(cpp_token_array *dts, cpp_token_array *sts)
     cpp_token_array_clear(sts);
 }
 
-void cpp_token_array_append(cpp_token_array *ts, cpp_token *tk)
+void cpp_token_array_append(cpp_token_array *ts, const cpp_token *tk)
 {
     if (ts->n < ts->max) {
         ts->tokens[ts->n++] = *tk;

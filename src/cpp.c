@@ -635,20 +635,18 @@ static void macro_arg_free(void *p)
 
 static uchar find_param(string_ref *param, uint n_param, cpp_token *tk)
 {
-    uint i, len;
+    uint i;
     string_ref name;
-    uchar buf[1024];
 
     if (n_param == 0 || tk->kind != TK_identifier)
         return 0;
 
-    len = cpp_token_splice(tk, buf, sizeof(buf));
-    name = string_ref_newlen((const char *)buf, len);
-
+    name = cpp_token_intern_id(tk);
     for (i = 0; i < n_param; i++) {
         if (param[i] == name)
             return 1;
     }
+
     return 0;
 }
 
@@ -656,8 +654,7 @@ static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
                               string_ref **param)
 {
     uchar first;
-    uchar buf[1024];
-    uint n, len, cap;
+    uint n, cap;
     string_ref *p = NULL;
 
     first = 1;
@@ -696,8 +693,7 @@ static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
             free(p);
             cpp_error(ctx, tk, "expected parameter name");
         }
-        len = cpp_token_splice(tk, buf, sizeof(buf));
-        p[n++] = string_ref_newlen((const char *)buf, len);
+        p[n++] = cpp_token_intern_id(tk);
         cpp_next(ctx, tk);
         first = 0;
     }
@@ -1017,15 +1013,12 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
 
 static cpp_macro_arg *find_arg(ht_t *args, cpp_token *tk)
 {
-    uint len;
-    uchar buf[1024];
     string_ref name;
 
     if (tk->kind != TK_identifier || args == NULL || args->count == 0)
         return NULL;
 
-    len = cpp_token_splice(tk, buf, sizeof(buf));
-    name = string_ref_newlen((const char *)buf, len);
+    name = cpp_token_intern_id(tk);
     return hash_table_lookup(args, name);
 }
 
@@ -1110,9 +1103,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 static uchar expand(cpp_context *ctx, cpp_token *tk)
 {
     uint i;
-    uchar buf[1024];
-    uint len = cpp_token_splice(tk, buf, sizeof(buf));
-    string_ref name = string_ref_newlen((const char *)buf, len);
+    string_ref name = cpp_token_intern_id(tk);
     cpp_macro *m = hash_table_lookup(&ctx->macro, name);
     if (m == NULL)
         return 0;
@@ -1161,19 +1152,17 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
 
 static void do_define(cpp_context *ctx, cpp_token *tk)
 {
-    uchar buf[1024];
     uchar flags = 0;
+    uint n_param = 0;
     cpp_macro *m, *m2;
     cpp_token_array body;
-    uint len, n_param = 0;
     string_ref name, *param = NULL;
 
     cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
         cpp_error(ctx, tk, "no macro name given in #define");
 
-    len = cpp_token_splice(tk, buf, sizeof(buf));
-    name = string_ref_newlen((const char *)buf, len);
+    name = cpp_token_intern_id(tk);
     if (name >= g__VA_ARGS__ && name <= g_defined) {
         if (name == g_defined)
             cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
@@ -1237,24 +1226,22 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
 
 static void do_undef(cpp_context *ctx, cpp_token *tk)
 {
-    uint len;
     cpp_macro *m;
-    uchar buf[1024];
     string_ref name;
 
     cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
         cpp_error(ctx, tk, "no macro name given in #undef");
 
-    len = cpp_token_splice(tk, buf, sizeof(buf));
-    name = string_ref_newlen((const char *)buf, len);
+    name = cpp_token_intern_id(tk);
     if (name >= g__VA_ARGS__ && name <= g_defined) {
         if (name == g_defined)
             cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
         else if (name == g__VA_ARGS__)
             cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
         else
-            cpp_warn(ctx, tk, "undefining '%s'", string_ref_ptr(name));
+            cpp_warn(ctx, tk, "undefining builtin macro '%s'",
+                              string_ref_ptr(name));
     }
 
     m = hash_table_remove(&ctx->macro, name);

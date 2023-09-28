@@ -74,6 +74,7 @@ typedef unsigned int tkchar;
 #define CPP_MACRO_BUILTIN   2 /* this macro is builtin macros */
 #define CPP_MACRO_VA_ARG    4 /* this macro arg is variadic args */
 #define CPP_MACRO_GUARD     8 /* this macro is used as header guard */
+#define CPP_MACRO_EXPR     16 /* this macro is used in #if/#elif expression */
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
@@ -270,6 +271,7 @@ typedef struct arg_stream {
  *             and never reset.
  */
 typedef struct {
+    uchar flags;
     cpp_token_array ts;
     cpp_token_array temp;
     cpp_token_array line;
@@ -313,11 +315,12 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 /* token.c */
 const char *cpp_token_kind(uchar kind);
 uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
-void cpp_token_print(FILE *fp, cpp_token *tk);
-void cpp_token_unpp(cpp_token *tk);
+void cpp_token_print(FILE *fp, const cpp_token *tk);
+void cpp_token_unpp(const cpp_token *tk);
+string_ref cpp_token_intern_id(const cpp_token *tk);
 void cpp_token_array_setup(cpp_token_array *ts, uint max);
 void cpp_token_array_clear(cpp_token_array *ts);
-void cpp_token_array_append(cpp_token_array *ts, cpp_token *tk);
+void cpp_token_array_append(cpp_token_array *ts, const cpp_token *tk);
 void cpp_token_array_move(cpp_token_array *dts, cpp_token_array *sts);
 void cpp_token_array_cleanup(cpp_token_array *ts);
 
