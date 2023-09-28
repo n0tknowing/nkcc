@@ -1222,8 +1222,11 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
         }
     }
 
-    if (i < os->n)
+    if (i < os->n) {
         os->tokens[i].flags |= param_tk->flags;
+        if (!PREV_SPACE(param_tk))
+            os->tokens[i].flags &= ~CPP_TOKEN_SPACE;
+    }
 
     arg_stream_pop(ctx);
 }
