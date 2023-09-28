@@ -24,6 +24,8 @@ static void macro_free(void *p);
 static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk);
 static uchar expand(cpp_context *ctx, cpp_token *tk);
 static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
+static cpp_directive_kind get_directive_kind(const uchar *buf, uint len);
+static void skip_line(cpp_context *ctx, cpp_token *tk);
 
 
 /* ------------------------------------------------------------------------ */
@@ -203,7 +205,7 @@ const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize)
  * Can read token from the result of a macro expansion. */
 static void cpp_next(cpp_context *ctx, cpp_token *tk)
 {
-    /* Backtrack, happen when try to call func-like macro without '(' */
+    /* Backtrack */
     if (unlikely(ctx->temp.n != 0)) {
         uint i;
         *tk = *ctx->temp.tokens;
@@ -492,15 +494,24 @@ include_error:
 
 /* --- #if stuff ---------------------------------------------------------- */
 
-static void cond_stack_push(cpp_context *ctx, cpp_token *tk, uchar included)
+static void cond_stack_push(cpp_context *ctx, cpp_token *tk)
 {
     cond_stack *cs = malloc(sizeof(cond_stack));
     assert(cs);
     cs->flags = 0;
+    cs->guard_name = 0;
     cs->token = *tk;
     cs->prev = ctx->stream->cond;
-    cs->ctx = included ? COND_IF : COND_DEAD;
     ctx->stream->cond = cs;
+}
+
+static void cond_stack_pop(cpp_context *ctx)
+{
+    if (ctx->stream->cond != NULL) {
+        cond_stack *prev = ctx->stream->cond->prev;
+        free(ctx->stream->cond);
+        ctx->stream->cond = prev;
+    }
 }
 
 static void cond_stack_cleanup(cpp_context *ctx)
@@ -510,6 +521,212 @@ static void cond_stack_cleanup(cpp_context *ctx)
         free(ctx->stream->cond);
         ctx->stream->cond = prev;
     }
+}
+
+static const char *cond_stack_name(cpp_context *ctx)
+{
+    switch (ctx->stream->cond->ctx) {
+    case COND_IF:
+        return "#if";
+    case COND_IFDEF:
+        return "#ifdef";
+    case COND_IFNDEF:
+        return "#ifndef";
+    case COND_ELIF:
+        return "#elif";
+    case COND_ELSE:
+        return "#else";
+    default:
+        return "conditional directive";
+    }
+}
+
+/* Skip until #elif/#else/#endif */
+static void cond_stack_skip(cpp_context *ctx, cpp_token *tk)
+{
+    uint len;
+    uchar buf[32];
+    int nested = 0;
+    cpp_token hash;
+    cpp_directive_kind dkind;
+
+    while (tk->kind != TK_eof) {
+        if (AT_BOL(tk) && tk->kind == '#') {
+            hash = *tk;
+            cpp_next(ctx, tk);
+            if (tk->kind == '\n') {
+                cpp_next(ctx, tk);
+                continue;
+            } else if (tk->kind != TK_identifier) {
+                skip_line(ctx, tk);
+                continue;
+            }
+            len = cpp_token_splice(tk, buf, sizeof(buf));
+            dkind = get_directive_kind(buf, len);
+            if (nested == 0 && (dkind == CPP_DIR_ELSE  ||
+                                dkind == CPP_DIR_ELIF  ||
+                                dkind == CPP_DIR_ENDIF)) {
+                cpp_token_array_append(&ctx->temp, &hash);
+                cpp_token_array_append(&ctx->temp, tk);
+                return;
+            } else if (dkind == CPP_DIR_IF    ||
+                       dkind == CPP_DIR_IFDEF ||
+                       dkind == CPP_DIR_IFNDEF) {
+                nested++;
+            } else if (dkind == CPP_DIR_ENDIF) {
+                nested--;
+            }
+        }
+        cpp_next(ctx, tk);
+    }
+
+    if (nested)
+        cpp_error(ctx, tk, "unterminated conditional directive");
+}
+
+static void do_ifdef(cpp_context *ctx, cpp_token *tk)
+{
+    uchar included;
+    string_ref name;
+
+    cpp_next(ctx, tk);
+    if (tk->kind != TK_identifier)
+        cpp_error(ctx, tk, "no macro name given in #ifdef");
+
+    name = cpp_token_intern_id(tk);
+    included = hash_table_lookup(&ctx->macro, name) != NULL;
+    cond_stack_push(ctx, tk);
+
+    cpp_next(ctx, tk);
+    if (tk->kind != '\n')
+        cpp_error(ctx, tk, "stray token after #ifdef");
+
+    ctx->stream->cond->ctx = COND_IFDEF;
+
+    if (!included) {
+        ctx->stream->cond->flags |= CPP_COND_SKIP;
+        cpp_next(ctx, tk);
+        cond_stack_skip(ctx, tk);
+    }
+}
+
+static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
+{
+    uint len;
+    cpp_token dir;
+    uchar buf[32];
+    uchar included;
+    cpp_directive_kind dkind;
+    string_ref name, guard_name;
+
+    cpp_next(ctx, tk);
+    if (tk->kind != TK_identifier)
+        cpp_error(ctx, tk, "no macro name given in #ifndef");
+
+    name = cpp_token_intern_id(tk);
+    included = hash_table_lookup(&ctx->macro, name) == NULL;
+    cond_stack_push(ctx, tk);
+
+    cpp_next(ctx, tk);
+    if (tk->kind != '\n')
+        cpp_error(ctx, tk, "stray token after #ifndef");
+
+    ctx->stream->cond->ctx = COND_IFNDEF;
+
+    if (!included) {
+        ctx->stream->cond->flags |= CPP_COND_SKIP;
+        cpp_next(ctx, tk);
+        cond_stack_skip(ctx, tk);
+    }
+
+    if (HAS_FLAG(hash.flags, CPP_TOKEN_BOF)) {
+        cpp_next(ctx, tk);
+        assert(AT_BOL(tk));
+        if (tk->kind != '#')
+            goto putback;
+        hash = *tk;
+        cpp_next(ctx, tk);
+        if (tk->kind == '\n') {
+            return;
+        } else if (tk->kind != TK_identifier) {
+            cpp_token_array_append(&ctx->temp, &hash);
+            goto putback;
+        }
+        len = cpp_token_splice(tk, buf, sizeof(buf));
+        dkind = get_directive_kind(buf, len);
+        if (dkind != CPP_DIR_DEFINE) {
+            cpp_token_array_append(&ctx->temp, &hash);
+            goto putback;
+        }
+        dir = *tk;
+        cpp_next(ctx, tk);
+        if (tk->kind != TK_identifier) {
+            cpp_token_array_append(&ctx->temp, &hash);
+            cpp_token_array_append(&ctx->temp, &dir);
+            goto putback;
+        }
+        guard_name = cpp_token_intern_id(tk);
+        if (guard_name == name) {
+            ctx->stream->cond->flags |= CPP_COND_GUARD;
+            ctx->stream->cond->guard_name = guard_name;
+        }
+        cpp_token_array_append(&ctx->temp, &hash);
+        cpp_token_array_append(&ctx->temp, &dir);
+    putback:
+        cpp_token_array_append(&ctx->temp, tk);
+    }
+}
+
+static void do_else(cpp_context *ctx, cpp_token *tk)
+{
+    if (ctx->stream->cond == NULL)
+        cpp_error(ctx, tk, "#else without previous #if");
+    else if (ctx->stream->cond->ctx == COND_ELSE)
+        cpp_error(ctx, tk, "#else after #else");
+
+    /* Put here for header guard detection */
+    ctx->stream->cond->flags |= CPP_COND_ELSIF;
+
+    if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        cond_stack_skip(ctx, tk);
+        return;
+    }
+
+    ctx->stream->cond->ctx = COND_ELSE;
+    ctx->stream->cond->flags &= ~CPP_COND_SKIP;
+
+    cpp_next(ctx, tk);
+    if (tk->kind != '\n')
+        cpp_error(ctx, tk, "stray token after #else");
+}
+
+static void do_endif(cpp_context *ctx, cpp_token *tk)
+{
+    cpp_macro *m;
+    string_ref guard_name;
+
+    if (ctx->stream->cond == NULL)
+        cpp_error(ctx, tk, "#endif without previous #if");
+
+    cpp_next(ctx, tk);
+    if (tk->kind != '\n')
+        cpp_error(ctx, tk, "stray token after #endif");
+
+    cpp_next(ctx, tk);
+    if (tk->kind == TK_eof) {
+        guard_name = ctx->stream->cond->guard_name;
+        if (HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD) &&
+            !HAS_FLAG(ctx->stream->cond->flags, CPP_COND_ELSIF)) {
+            m = hash_table_lookup(&ctx->macro, guard_name);
+            if (m != NULL)
+                m->flags |= CPP_MACRO_GUARD;
+        }
+    } else {
+        /* Put back the token, no need to put back the previous '\n' */
+        cpp_token_array_append(&ctx->temp, tk);
+    }
+
+    cond_stack_pop(ctx);
 }
 
 /* ---- macro stuff ------------------------------------------------------- */
@@ -1217,8 +1434,15 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         m->n_param = n_param;
     }
 
-    if (m2 != NULL)
-        cpp_warn(ctx, tk, "'%s' redefined", string_ref_ptr(name));
+    if (m2 != NULL) {
+        if (HAS_FLAG(m2->flags, CPP_MACRO_GUARD)) {
+            cpp_warn(ctx, tk, "'%s' already defined as header guard macro",
+                              string_ref_ptr(name));
+            m->flags &= ~CPP_MACRO_GUARD;
+        } else {
+            cpp_warn(ctx, tk, "'%s' redefined", string_ref_ptr(name));
+        }
+    }
 
     body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
     hash_table_insert(&ctx->macro, name, m);
@@ -1245,8 +1469,12 @@ static void do_undef(cpp_context *ctx, cpp_token *tk)
     }
 
     m = hash_table_remove(&ctx->macro, name);
-    if (m != NULL)
+    if (m != NULL) {
+        if (HAS_FLAG(m->flags, CPP_MACRO_GUARD))
+            cpp_warn(ctx, tk, "undefining header guard macro '%s'",
+                     string_ref_ptr(name));
         macro_free((void *)m);
+    }
 
     cpp_next(ctx, tk);
     if (tk->kind != '\n')
@@ -1259,7 +1487,7 @@ static void skip_line(cpp_context *ctx, cpp_token *tk)
 {
     do {
         cpp_next(ctx, tk);
-    } while (tk->kind != '\n');
+    } while (tk->kind != '\n' && tk->kind != TK_eof);
 }
 
 static cpp_directive_kind get_directive_kind(const uchar *buf, uint len)
@@ -1324,17 +1552,22 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
     while (1) {
         cpp_next(ctx, tk);
         if (tk->kind == TK_eof) {
+            if (ctx->stream->cond != NULL) {
+                cpp_error(ctx, &ctx->stream->cond->token, "unterminated %s",
+                          cond_stack_name(ctx));
+            }
             cpp_stream_pop(ctx);
             if (ctx->stream == NULL)
                 return;
             continue;
         } else if (tk->kind == '\n') {
             continue;
-        } else if (tk->kind == TK_identifier && expand(ctx, tk)) {
-            continue;
-        } else if (!is_hash(ctx, tk)) {
-            return;
         }
+
+        if (tk->kind == TK_identifier && expand(ctx, tk))
+            continue;
+        else if (!is_hash(ctx, tk))
+            return;
 
         hash = *tk;
         cpp_next(ctx, tk);
@@ -1350,12 +1583,20 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             do_include(ctx, tk);
             break;
         case CPP_DIR_IF:
-        case CPP_DIR_IFDEF:
-        case CPP_DIR_IFNDEF:
         case CPP_DIR_ELIF:
-        case CPP_DIR_ELSE:
-        case CPP_DIR_ENDIF:
             skip_line(ctx, tk);
+            break;
+        case CPP_DIR_ELSE:
+            do_else(ctx, tk);
+            break;
+        case CPP_DIR_IFDEF:
+            do_ifdef(ctx, tk);
+            break;
+        case CPP_DIR_IFNDEF:
+            do_ifndef(ctx, tk, hash);
+            break;
+        case CPP_DIR_ENDIF:
+            do_endif(ctx, tk);
             break;
         case CPP_DIR_DEFINE:
             do_define(ctx, tk);
@@ -1373,7 +1614,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             do_error(ctx, tk);
             break;
         default:
-            cpp_error(ctx, tk, "unknown directive '%.*s'", len, (const char *)buf);
+            cpp_error(ctx, tk, "unknown directive '%.*s'", len, buf);
             break;
         }
     }

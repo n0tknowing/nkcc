@@ -66,6 +66,8 @@ typedef unsigned int tkchar;
 
 /* flags for cond_stack */
 #define CPP_COND_ELSIF      1 /* this branch has #elif/#else */
+#define CPP_COND_SKIP       2 /* we are looking for #elif/#else/#endif */
+#define CPP_COND_GUARD      4 /* #ifdef ... #define was checked */
 /* limits for cond_stack */
 #define CPP_COND_MAX       32 /* nested, per file */
 
@@ -213,7 +215,13 @@ typedef struct {
 
 typedef struct cond_stack {
     uchar flags;
-    enum { COND_IF, COND_ELIF, COND_ELSE, COND_DEAD } ctx;
+    string_ref guard_name; /* non-zero if CPP_COND_GUARD flag is set */
+    enum {
+        COND_IF, COND_IFDEF, COND_IFNDEF,
+        COND_ELIF,
+        COND_ELSE,
+        COND_SKIP
+    } ctx;
     cpp_token token; /* for header guard detection or diagnostic */
     struct cond_stack *prev; /* nested */
 } cond_stack;
