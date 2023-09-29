@@ -3,11 +3,12 @@
 static void usage(int exit_code)
 {
     puts("Usage:");
-    puts("  cpp [-EP] [-o OUT_FILE] FILE");
+    puts("  cpp [-EP] [-I DIR] [-o OUT_FILE] FILE");
     puts("");
     puts("Options:");
     puts("  -o OUT_FILE     Place the output into OUT_FILE");
     puts("  -E              Preprocess only");
+    puts("  -I DIR          Append DIR to the include search path");
     puts("  -P              Disable linemarker output in -E mode");
     exit(exit_code);
 }
@@ -19,13 +20,25 @@ int main(int argc, char **argv)
     int opt, opt_e = 0;
     const char *in, *out = NULL;
 
-    while ((opt = getopt(argc, argv, ":EPo:")) != EOF) {
+    cpp_context_setup(&ctx);
+
+    while ((opt = getopt(argc, argv, ":EI:Po:")) != EOF) {
         switch (opt) {
         case 'E':
             opt_e = 1;
             break;
+        case 'I':
+            cpp_file_add_sysdir(optarg);
+            break;
         case 'o':
-            out = optarg;
+            if (out != NULL) {
+                fputs("error: -o is already specified\n", stderr);
+                free((char *)out);
+                cpp_context_cleanup(&ctx);
+                return 1;
+            }
+            out = (const char *)strdup(optarg);
+            assert(out);
             break;
         case 'P':
             break;
@@ -45,6 +58,8 @@ int main(int argc, char **argv)
         fp = fopen(out, "w+");
         if (fp == NULL) {
             fprintf(stderr, "unable to open '%s': %s\n", out, strerror(errno));
+            free((char *)out);
+            cpp_context_cleanup(&ctx);
             return 1;
         }
     } else {
@@ -52,12 +67,14 @@ int main(int argc, char **argv)
     }
 
     in = argv[0];
-    cpp_context_setup(&ctx);
 
     cpp_file *f = cpp_file_open(in, getenv("PWD"));
     if (f == NULL) {
         fprintf(stderr, "unable to open '%s': %s\n", in, strerror(errno));
-        if (out != NULL) fclose(fp);
+        if (out != NULL) {
+            fclose(fp);
+            free((char *)out);
+        }
         cpp_context_cleanup(&ctx);
         return 1;
     }
@@ -69,6 +86,10 @@ int main(int argc, char **argv)
         printf("total tokens: %u\n", ctx.ts.n);
     }
 
-    if (out != NULL) fclose(fp);
+    if (out != NULL) {
+        fclose(fp);
+        free((char *)out);
+    }
+
     cpp_context_cleanup(&ctx);
 }

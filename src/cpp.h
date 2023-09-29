@@ -222,7 +222,7 @@ typedef struct cond_stack {
         COND_ELSE,
         COND_SKIP
     } ctx;
-    cpp_token token; /* for header guard detection or diagnostic */
+    cpp_token token; /* for diagnostic */
     struct cond_stack *prev; /* nested */
 } cond_stack;
 

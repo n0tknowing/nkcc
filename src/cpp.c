@@ -1549,8 +1549,8 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
         cpp_next(ctx, tk);
         if (tk->kind == TK_eof) {
             if (ctx->stream->cond != NULL) {
-                cpp_error(ctx, &ctx->stream->cond->token, "unterminated %s",
-                          cond_stack_name(ctx));
+                hash = ctx->stream->cond->token;
+                cpp_error(ctx, &hash, "unterminated %s", cond_stack_name(ctx));
             }
             cpp_stream_pop(ctx);
             if (ctx->stream == NULL)

@@ -31,8 +31,9 @@ void cpp_file_cleanup(void)
 {
     int i;
 
-    for (i = g_sysdir_count - 1; i >= 0; i--)
-        g_sysdir[i] = NULL;
+    for (i = 3; i < g_sysdir_count; i++)
+        free((char *)g_sysdir[i]);
+
     g_sysdir_count = 0;
 
     for (i = 1; i < g_file_count; i++) {
@@ -46,10 +47,13 @@ void cpp_file_cleanup(void)
     }
 }
 
-void cpp_file_add_sysdir(const char *name)
+void cpp_file_add_sysdir(const char *_name)
 {
+    char *name;
     err_if(g_sysdir_count >= MAX_SYSDIR, "too many directories");
-    g_sysdir[g_sysdir_count++] = name;
+    name = strdup(_name);
+    err_if(name == NULL, "out of memory while adding include search path");
+    g_sysdir[g_sysdir_count++] = (const char *)name;
 }
 
 /* if #include <...>, `cwd` is NULL. */
@@ -141,7 +145,7 @@ open_file:
 
     close(fd);
 
-    if (data[offset - 1] != '\n') {
+    if (offset > 0 && data[offset - 1] != '\n') {
         flags |= CPP_FILE_NONL; // For diagnostic
         data[offset] = '\n';
         data[offset + 1] = 0;
