@@ -6,7 +6,6 @@
  *   is used.
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
- * - __COUNTER__ is not handled correctly.
  *
  * Forever issues:
  * - Diagnostic.
@@ -35,7 +34,6 @@ static string_ref g__VA_ARGS__,
                   g__LINE__,
                   g__DATE__,
                   g__TIME__,
-                  g__COUNTER__,
                   g__BASE_FILE__,
                   g__TIMESTAMP__,
                   g_defined;
@@ -50,7 +48,6 @@ void cpp_context_setup(cpp_context *ctx)
     g__VA_ARGS__ = LITREF("__VA_ARGS__");
     g__FILE__ = LITREF("__FILE__");
     g__LINE__ = LITREF("__LINE__");
-    g__COUNTER__ = LITREF("__COUNTER__");
     g__BASE_FILE__ = LITREF("__BASE_FILE__");
     g__TIMESTAMP__ = LITREF("__TIMESTAMP__");
     g__DATE__ = LITREF("__DATE__");
@@ -745,7 +742,6 @@ static void builtin_macro_setup(cpp_context *ctx)
 
     ADD_BUILTIN(g__FILE__);
     ADD_BUILTIN(g__LINE__);
-    ADD_BUILTIN(g__COUNTER__);
     ADD_BUILTIN(g__BASE_FILE__);
     ADD_BUILTIN(g__TIMESTAMP__);
     ADD_BUILTIN(g__DATE__);
@@ -1018,9 +1014,6 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         macro_tk->kind = TK_string;
     } else if (name == g__LINE__) {
         len = snprintf(buf, sizeof(buf), "%u", get_lineno_tok(ctx, macro_tk));
-        macro_tk->kind = TK_number;
-    } else if (name == g__COUNTER__) {
-        len = snprintf(buf, sizeof(buf), "%u", ctx->ppcounter++);
         macro_tk->kind = TK_number;
     } else if (name == g__BASE_FILE__) {
         cpp_stream *s = ctx->stream;

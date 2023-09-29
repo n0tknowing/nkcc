@@ -275,8 +275,6 @@ typedef struct arg_stream {
  * `buf` is dynamic buffer, used to store temporary token pointer.
  * `ppdate` is the cached value of __DATE__ macro.
  * `pptime` is the cached value of __TIME__ macro.
- * `ppcounter` is the counter value of __COUNTER__ macro. it keeps increasing
- *             and never reset.
  */
 typedef struct {
     uchar flags;
@@ -291,7 +289,6 @@ typedef struct {
     cpp_buffer *buf;
     const uchar *ppdate;
     const uchar *pptime;
-    uint ppcounter;
     /* add more... */
 } cpp_context;
 
