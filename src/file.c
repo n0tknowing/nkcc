@@ -178,7 +178,7 @@ void cpp_file_close(cpp_file *file)
 
 cpp_file *cpp_file_id(ushort id)
 {
-    if (id < g_file_count)
+    if (id != 0 && id < g_file_count)
         return &g_files[id];
     errno = EINVAL;
     return NULL;
