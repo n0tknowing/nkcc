@@ -28,7 +28,7 @@ int main(int argc, char **argv)
             opt_e = 1;
             break;
         case 'I':
-            cpp_file_add_sysdir(optarg);
+            cpp_search_path_append(&ctx, optarg);
             break;
         case 'o':
             if (out != NULL) {
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 
     in = argv[0];
 
-    cpp_file *f = cpp_file_open(in, getenv("PWD"));
+    cpp_file *f = cpp_file_open(in, in);
     if (f == NULL) {
         fprintf(stderr, "unable to open '%s': %s\n", in, strerror(errno));
         if (out != NULL) {

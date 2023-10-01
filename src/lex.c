@@ -345,7 +345,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
     tk->flags = s->flags;
     s->flags = 0;
-    tk->fileno = s->file->id;
+    tk->fileno = s->file->no;
 
     while (*s->p) {
         /* line continuation */

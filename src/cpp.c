@@ -2,17 +2,15 @@
  * - Token spacing.
  * - I'm not satisfied with the current implementation of builtin_macro_setup()
  *   and expand_builtin() because these don't handle non-dynamic builtin macros.
- * - Printing current file doesn't seem to be right. Especially when #include
- *   is used.
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
- * - Wrong #include logic.
  *
  * Forever issues:
  * - Diagnostic.
  */
 #include "cpp.h"
 
+static void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...);
 static void cpp_preprocess(cpp_context *ctx, cpp_token *tk);
 static void cpp_stream_push(cpp_context *ctx, cpp_file *file);
 static void cpp_stream_pop(cpp_context *ctx);
@@ -39,6 +37,9 @@ static string_ref g__VA_ARGS__,
                   g__TIMESTAMP__,
                   g_defined;
 
+static char *g_include_search_path[128];
+static int g_include_search_path_count;
+
 /* ------------------------------------------------------------------------ */
 
 void cpp_context_setup(cpp_context *ctx)
@@ -57,7 +58,12 @@ void cpp_context_setup(cpp_context *ctx)
 
     memset(ctx, 0, sizeof(cpp_context));
 
+    cpp_search_path_append(ctx, "/usr/include");
+    cpp_search_path_append(ctx, "/usr/local/include");
+    cpp_search_path_append(ctx, "/usr/include/x86_64-linux-gnu");
+
     hash_table_setup(&ctx->cached_file, 16);
+    hash_table_setup(&ctx->guarded_file, 32);
     hash_table_setup(&ctx->macro, 1024);
 
     cpp_token_array_setup(&ctx->temp, 4);
@@ -70,6 +76,8 @@ void cpp_context_setup(cpp_context *ctx)
 
 void cpp_context_cleanup(cpp_context *ctx)
 {
+    int i;
+
     cpp_file_cleanup();
     string_pool_cleanup();
 
@@ -88,9 +96,29 @@ void cpp_context_cleanup(cpp_context *ctx)
     cpp_token_array_cleanup(&ctx->ts);
 
     hash_table_cleanup(&ctx->cached_file);
+    hash_table_cleanup(&ctx->guarded_file);
     hash_table_cleanup_with_free(&ctx->macro, macro_free);
 
+    for (i = 0; i < g_include_search_path_count; i++) {
+        free(g_include_search_path[i]);
+        g_include_search_path[i] = NULL;
+    }
+
+    g_include_search_path_count = 0;
     memset(ctx, 0, sizeof(cpp_context));
+}
+
+void cpp_search_path_append(cpp_context *ctx, const char *dirpath)
+{
+    char *path;
+
+    if (g_include_search_path_count >= 128)
+        cpp_error(ctx, NULL, "too many search paths");
+
+    path = strdup(dirpath);
+    assert(path);
+    g_include_search_path[g_include_search_path_count] = path;
+    g_include_search_path_count++;
 }
 
 void cpp_run(cpp_context *ctx, cpp_file *file)
@@ -249,34 +277,15 @@ static void cpp_next_nonl(cpp_context *ctx, cpp_token *tk)
     } while (tk->kind == '\n');
 }
 
-/* Merge tokens into `buf` until `end_kind` */
-static uint join_tokens(cpp_token *tk, cpp_token **end, uchar end_kind,
-                        uchar *buf, uint bufsz)
-{
-    ushort i;
-    uint len, off = 0;
-
-    while (off < bufsz) {
-        if (PREV_SPACE(tk))
-            buf[off++] = ' ';
-        len = cpp_token_splice(tk, buf + off, MIN(bufsz - off, bufsz));
-        off += len; tk++;
-        if (tk->kind == TK_eof || tk->kind == end_kind)
-            break;
-    }
-
-    *end = tk;
-    return off;
-}
-
 /* ---- diagnostic -------------------------------------------------------- */
 
 static void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
-                                                get_lineno_tok(ctx, tk));
+    if (ctx->stream != NULL)
+        fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
+                                                    get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;31merror:\x1b[0m ");
     vfprintf(stderr, s, ap);
     fputc('\n', stderr);
@@ -289,8 +298,9 @@ static void cpp_warn(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
-                                                get_lineno_tok(ctx, tk));
+    if (ctx->stream != NULL)
+        fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
+                                                    get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;35mwarning:\x1b[0m ");
     vfprintf(stderr, s, ap);
     fputc('\n', stderr);
@@ -390,7 +400,7 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     s->pplineno_loc = s->pplineno_val = 0;
     s->lineno = 1;
     s->p = file->data;
-    s->fname = s->ppfname = file->name;
+    s->fname = s->ppfname = string_ref_ptr(file->name);
     s->file = file;
     s->cond = NULL;
     s->prev = ctx->stream;
@@ -406,23 +416,88 @@ static void cpp_stream_pop(cpp_context *ctx)
     }
 }
 
-static uchar *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
-                          const char **cwd, uint *outlen)
+/* Merge tokens into `buf` until `end_kind` */
+static uint join_tokens(cpp_token *tk, cpp_token **end, uchar end_kind,
+                        uchar *buf, uint bufsz)
+{
+    ushort i;
+    uint len, off = 0;
+
+    while (off < bufsz) {
+        if (PREV_SPACE(tk))
+            buf[off++] = ' ';
+        len = cpp_token_splice(tk, buf + off, MIN(bufsz - off, bufsz));
+        off += len; tk++;
+        if (tk->kind == TK_eof || tk->kind == end_kind)
+            break;
+    }
+
+    *end = tk;
+    return off;
+}
+
+static string_ref search_include_path(const char *name, const char *cwd,
+                                      struct stat *sb)
+{
+    int i;
+    uint pathlen;
+    char buf[PATH_MAX + 1];
+    string_ref pathref = 0;
+    const char *search_path;
+
+    if (name[0] != '/') {
+        if (cwd != NULL) { /* #include "..." */
+            snprintf(buf, sizeof(buf), "%s/%s", cwd, name);
+            if (stat(buf, sb) == -1) {
+                if (errno != ENOENT)
+                    goto done;
+                /* else fallthrough and try to #include <...> */
+            } else {
+                pathref = string_ref_new(buf);
+                goto done;
+            }
+        }
+        /* #include <...> */
+        for (i = 0; i < g_include_search_path_count; i++) {
+            search_path = g_include_search_path[i];
+            snprintf(buf, sizeof(buf), "%s/%s", search_path, name);
+            if (stat(buf, sb) == -1) {
+                if (errno != ENOENT)
+                    goto done;
+            } else {
+                pathref = string_ref_new(buf);
+                goto done;
+            }
+        }
+        errno = ENOENT;
+    } else {
+        if (stat(name, sb) != -1)
+            pathref = string_ref_new(buf);
+    }
+
+done:
+    return pathref;
+}
+
+static const char *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
+                               const char **cwd, uint *outlen, uchar *is_sys)
 {
     uint len = 0;
-    uchar *path = buf;
+    const char *path = (const char *)buf;
     cpp_token *tok = expand_line(ctx, tk);
 
     if (tok->kind == TK_string) {
         len = cpp_token_splice(tok, buf, PATH_MAX);
         buf[len - 1] = 0; path++; len -= 2;
-        if (cwd) *cwd = ctx->stream->file->dirpath;
+        if (cwd) *cwd = string_ref_ptr(ctx->stream->file->dirpath);
+        if (is_sys) *is_sys = 0;
         tok++;
     } else if (tok->kind == '<') {
         tok++;
         len = join_tokens(tok, &tok, '>', buf, PATH_MAX);
         buf[len] = 0;
         if (cwd) *cwd = NULL;
+        if (is_sys) *is_sys = 1;
         tok++;
     } else {
         buf[0] = 0;
@@ -442,31 +517,34 @@ static uchar *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
 static void do_include(cpp_context *ctx, cpp_token *tk)
 {
     uint len;
+    cpp_macro *m;
     cpp_file *file;
     cpp_token pathtk;
-    string_ref pathref;
-    const char *cwd = NULL;
-    uchar in_macro_expansion = 0;
-    uchar buf[PATH_MAX + 1], *path = buf;
+    uchar is_sys = 0;
+    struct stat sb = {0};
+    uchar buf[PATH_MAX + 1];
+    string_ref pathref, nameref;
+    const char *cwd = NULL, *name = (const char *)buf;
 
     cpp_next(ctx, tk);
     pathtk = *tk;
 
     if (tk->kind == TK_string) {
         len = cpp_token_splice(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; path++; len -= 2;
-        cwd = ctx->stream->file->dirpath;
+        buf[len - 1] = 0; name++; len -= 2; /* remove "" */
+        cwd = string_ref_ptr(ctx->stream->file->dirpath);
         cpp_next(ctx, tk);
     } else if (tk->kind == '<') {
         cpp_lex_string(ctx->stream, tk, '>');
         len = cpp_token_splice(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; len--;
+        buf[len - 1] = 0; len--; /* remove > */
         cpp_next(ctx, tk);
+        is_sys = 1;
     } else {
         if (tk->kind != TK_identifier)
             goto include_error;
-        path = do_include2(ctx, tk, buf, &cwd, &len);
-        if (path == NULL)
+        name = do_include2(ctx, tk, buf, &cwd, &len, &is_sys);
+        if (name == NULL)
             goto include_error;
     }
 
@@ -475,12 +553,29 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     else if (len == 0)
         cpp_error(ctx, &pathtk, "empty filename");
 
-    pathref = string_ref_newlen((const char *)path, len);
+    pathref = search_include_path(name, cwd, &sb);
+    if (pathref == 0)
+        cpp_error(ctx, &pathtk, "unable to open '%s': %s", name, strerror(errno));
+
+    if (is_sys)
+        name = string_ref_ptr(pathref);
+
+    m = hash_table_lookup(&ctx->guarded_file, pathref);
+    if (m != NULL && HAS_FLAG(m->flags, CPP_MACRO_GUARD)) {
+        file = cpp_file_no(m->fileno);
+        if (file != NULL &&
+            (uint)sb.st_size == file->size &&
+            (uint)sb.st_dev == file->devid &&
+            (uint)sb.st_ino == file->inode)
+            return;
+    }
+
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
-        file = cpp_file_open((const char *)path, cwd);
+        nameref = string_ref_newlen(name, len);
+        file = cpp_file_open2(pathref, nameref, &sb);
         if (file == NULL)
-            cpp_error(ctx, &pathtk, "unable to open '%s': %s", path, strerror(errno));
+            cpp_error(ctx, &pathtk, "unable to open '%s': %s", name, strerror(errno));
     }
 
     cpp_stream_push(ctx, file);
@@ -701,7 +796,7 @@ static void do_else(cpp_context *ctx, cpp_token *tk)
 static void do_endif(cpp_context *ctx, cpp_token *tk)
 {
     cpp_macro *m;
-    string_ref guard_name;
+    string_ref guard_name, pathref;
 
     if (ctx->stream->cond == NULL)
         cpp_error(ctx, tk, "#endif without previous #if");
@@ -716,8 +811,11 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
         if (HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD) &&
             !HAS_FLAG(ctx->stream->cond->flags, CPP_COND_ELSIF)) {
             m = hash_table_lookup(&ctx->macro, guard_name);
-            if (m != NULL)
+            if (m != NULL) {
+                pathref = ctx->stream->file->path;
                 m->flags |= CPP_MACRO_GUARD;
+                hash_table_insert(&ctx->guarded_file, pathref, m);
+            }
         }
     } else {
         /* Put back the token, no need to put back the previous '\n' */
@@ -729,12 +827,13 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
 
 /* ---- macro stuff ------------------------------------------------------- */
 
-#define ADD_BUILTIN(name) do {                          \
-        m = macro_new(name, CPP_MACRO_BUILTIN, dummy);  \
-        hash_table_insert(&ctx->macro, name, m);        \
+#define ADD_BUILTIN(name) do {                              \
+        m = macro_new(name, CPP_MACRO_BUILTIN, 0, dummy);   \
+        hash_table_insert(&ctx->macro, name, m);            \
     } while (0)
 
-static cpp_macro *macro_new(string_ref name, uchar flags, cpp_token_array body);
+static cpp_macro *macro_new(string_ref name, uchar flags, ushort fileno,
+                            cpp_token_array body);
 static cpp_token_array dummy;
 
 static void builtin_macro_setup(cpp_context *ctx)
@@ -810,11 +909,13 @@ static void arg_stream_pop(cpp_context *ctx)
     }
 }
 
-static cpp_macro *macro_new(string_ref name, uchar flags, cpp_token_array body)
+static cpp_macro *macro_new(string_ref name, uchar flags, ushort fileno,
+                            cpp_token_array body)
 {
     cpp_macro *m = calloc(1, sizeof(cpp_macro));
     assert(m);
     m->name = name;
+    m->fileno = fileno;
     m->flags = flags;
     m->body = body;
     return m;
@@ -1366,11 +1467,12 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
 
 static void do_define(cpp_context *ctx, cpp_token *tk)
 {
+    cpp_file *file;
     uchar flags = 0;
     uint n_param = 0;
-    cpp_macro *m, *m2;
+    cpp_macro *m, *old_m;
     cpp_token_array body;
-    string_ref name, *param = NULL;
+    string_ref name, pathref, *param = NULL;
 
     cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
@@ -1384,7 +1486,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
             cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
     }
 
-    m2 = hash_table_lookup(&ctx->macro, name);
+    old_m = hash_table_lookup(&ctx->macro, name);
     cpp_next(ctx, tk);
 
     if (tk->kind == '(' && !PREV_SPACE(tk)) {
@@ -1425,24 +1527,35 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
     tk->kind = TK_eom;
     cpp_token_array_append(&body, tk);
 
-    m = macro_new(name, flags, body);
-    if (HAS_FLAG(flags, CPP_MACRO_FUNC)) {
-        m->param = param;
-        m->n_param = n_param;
-    }
-
-    if (m2 != NULL) {
-        if (HAS_FLAG(m2->flags, CPP_MACRO_GUARD)) {
+    if (old_m != NULL) {
+        if (HAS_FLAG(old_m->flags, CPP_MACRO_GUARD)) {
             cpp_warn(ctx, tk, "'%s' already defined as header guard macro",
                               string_ref_ptr(name));
-            m->flags &= ~CPP_MACRO_GUARD;
+            file = cpp_file_no(old_m->fileno);
+            hash_table_remove(&ctx->guarded_file, file->path);
         } else {
             cpp_warn(ctx, tk, "'%s' redefined", string_ref_ptr(name));
         }
+        if (HAS_FLAG(flags, CPP_MACRO_FUNC)) {
+            if (HAS_FLAG(old_m->flags, CPP_MACRO_FUNC))
+                free(old_m->param);
+            old_m->param = param;
+            old_m->n_param = n_param;
+        }
+        old_m->flags = flags;
+        old_m->fileno = ctx->stream->file->no;
+        cpp_token_array_cleanup(&old_m->body);
+        old_m->body = body;
+    } else {
+        m = macro_new(name, flags, ctx->stream->file->no, body);
+        if (HAS_FLAG(flags, CPP_MACRO_FUNC)) {
+            m->param = param;
+            m->n_param = n_param;
+        }
+        hash_table_insert(&ctx->macro, name, m);
     }
 
     body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
-    hash_table_insert(&ctx->macro, name, m);
 }
 
 static void do_undef(cpp_context *ctx, cpp_token *tk)

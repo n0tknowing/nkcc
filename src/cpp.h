@@ -176,11 +176,12 @@ typedef enum {
 
 typedef struct {
     uchar flags;
-    ushort id;
+    ushort no;
     uint size;
-    const char *name;
-    const char *path;
-    const char *dirpath;
+    uint inode, devid;
+    string_ref name;
+    string_ref path;
+    string_ref dirpath;
     uchar *data;
 } cpp_file;
 
@@ -201,6 +202,7 @@ typedef struct {
 
 typedef struct {
     uchar flags;
+    ushort fileno;
     uint n_param;
     string_ref name;
     string_ref *param;
@@ -286,6 +288,7 @@ typedef struct {
     arg_stream *argstream;
     ht_t macro;
     ht_t cached_file;
+    ht_t guarded_file;
     cpp_buffer *buf;
     const uchar *ppdate;
     const uchar *pptime;
@@ -300,16 +303,17 @@ void cpp_context_setup(cpp_context *ctx);
 void cpp_context_cleanup(cpp_context *ctx);
 void cpp_run(cpp_context *ctx, cpp_file *file);
 void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp);
+void cpp_search_path_append(cpp_context *ctx, const char *dirpath);
 const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize);
 const uchar *cpp_buffer_append_ch(cpp_context *ctx, uchar ch);
 
 /* file.c */
 void cpp_file_setup(void);
 void cpp_file_cleanup(void);
-void cpp_file_add_sysdir(const char *name);
-cpp_file *cpp_file_open(const char *path, const char *cwd);
+cpp_file *cpp_file_open(const char *path, const char *name);
+cpp_file *cpp_file_open2(string_ref path, string_ref name, struct stat *sb);
 void cpp_file_close(cpp_file *file);
-cpp_file *cpp_file_id(ushort id);
+cpp_file *cpp_file_no(ushort no);
 
 /* lex.c */
 void cpp_lex_setup(cpp_context *ctx);
