@@ -4,7 +4,12 @@ static cpp_file g_files[CPP_FILE_MAX_USED];
 static int g_file_count = 1; /* 0 is reserved */
 
 void cpp_file_setup(void)
-{}
+{
+    cpp_file *f = &g_files[0];
+    f->name = LITREF("<command-line>");
+    f->path = f->name;
+    f->dirpath = LITREF(".");
+}
 
 void cpp_file_cleanup(void)
 {

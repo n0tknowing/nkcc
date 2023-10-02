@@ -25,6 +25,9 @@ static uchar expand(cpp_context *ctx, cpp_token *tk);
 static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
 static cpp_directive_kind get_directive_kind(const uchar *buf, uint len);
 static void skip_line(cpp_context *ctx, cpp_token *tk);
+static void parse_macro_body(cpp_context *ctx, cpp_token *tk,
+                             cpp_token_array *body, string_ref *param,
+                             uint n_param, uchar flags);
 
 
 /* ------------------------------------------------------------------------ */
@@ -45,8 +48,8 @@ static int g_include_search_path_count;
 
 void cpp_context_setup(cpp_context *ctx)
 {
-    cpp_file_setup();
     string_pool_setup();
+    cpp_file_setup();
 
     g__VA_ARGS__ = LITREF("__VA_ARGS__");
     g__FILE__ = LITREF("__FILE__");
@@ -79,8 +82,8 @@ void cpp_context_cleanup(cpp_context *ctx)
 {
     int i;
 
-    cpp_file_cleanup();
     string_pool_cleanup();
+    cpp_file_cleanup();
 
     while (ctx->stream != NULL) {
         cond_stack_cleanup(ctx);
@@ -113,8 +116,8 @@ void cpp_search_path_append(cpp_context *ctx, const char *dirpath)
 {
     char *path;
 
-    if (g_include_search_path_count >= 128)
-        cpp_error(ctx, NULL, "too many search paths");
+    if (g_include_search_path_count == 128)
+        cpp_error(ctx, NULL, "too many #include search paths");
 
     path = strdup(dirpath);
     assert(path);
@@ -966,6 +969,48 @@ static uchar find_param(string_ref *param, uint n_param, cpp_token *tk)
     return 0;
 }
 
+static void parse_macro_body(cpp_context *ctx, cpp_token *tk,
+                             cpp_token_array *body, string_ref *param,
+                             uint n_param, uchar flags)
+{
+    const char *e1 = "'#' is not followed by a macro parameter";
+    const char *e2 = "'##' cannot appear at the beginning of replacement list";
+    const char *e3 = "'##' cannot appear at the end of replacement list";
+
+    cpp_token_array_setup(body, 8);
+
+    while (tk->kind != '\n' && tk->kind != TK_eof) {
+        tk->flags &= ~CPP_TOKEN_BOL;
+        if (tk->kind == '#' && HAS_FLAG(flags, CPP_MACRO_FUNC)) {
+            cpp_token_array_append(body, tk); /* append # */
+            cpp_next(ctx, tk);
+            if (!find_param(param, n_param, tk)) {
+                free(param);
+                cpp_token_array_cleanup(body);
+                cpp_error(ctx, tk, "%s", e1);
+            }
+        } else if (tk->kind == TK_paste) {
+            if (body->n == 0) {
+                free(param);
+                cpp_token_array_cleanup(body);
+                cpp_error(ctx, tk, "%s", e2);
+            }
+            cpp_token_array_append(body, tk); /* append ## */
+            cpp_next(ctx, tk);
+            if (tk->kind == '\n' || tk->kind == TK_eof) {
+                free(param);
+                cpp_token_array_cleanup(body);
+                cpp_error(ctx, tk, "%s", e3);
+            }
+        }
+        cpp_token_array_append(body, tk);
+        cpp_next(ctx, tk);
+    }
+
+    tk->kind = TK_eom;
+    cpp_token_array_append(body, tk);
+}
+
 static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
                               string_ref **param)
 {
@@ -1458,7 +1503,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
     }
 
     ms->p = ms->tok.tokens;
-
     ms->tok.tokens[0].flags |= macro_tk.flags;
     ms->tok.tokens[0].lineno = macro_tk.lineno;
     return 1;
@@ -1493,39 +1537,6 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         flags = CPP_MACRO_FUNC;
     }
 
-    cpp_token_array_setup(&body, 8);
-
-    while (tk->kind != '\n' && tk->kind != TK_eof) {
-        tk->flags &= ~CPP_TOKEN_BOL;
-        if (tk->kind == '#' && HAS_FLAG(flags, CPP_MACRO_FUNC)) {
-            cpp_token_array_append(&body, tk); /* append # */
-            cpp_next(ctx, tk);
-            if (!find_param(param, n_param, tk)) {
-                free(param);
-                cpp_token_array_cleanup(&body);
-                cpp_error(ctx, tk, "'#' is not followed by a macro parameter");
-            }
-        } else if (tk->kind == TK_paste) {
-            if (body.n == 0) {
-                free(param);
-                cpp_token_array_cleanup(&body);
-                cpp_error(ctx, tk, "'##' cannot appear at either end of replacement list");
-            }
-            cpp_token_array_append(&body, tk); /* append ## */
-            cpp_next(ctx, tk);
-            if (tk->kind == '\n' || tk->kind == TK_eof) {
-                free(param);
-                cpp_token_array_cleanup(&body);
-                cpp_error(ctx, tk, "'##' cannot appear at either end of replacement list");
-            }
-        }
-        cpp_token_array_append(&body, tk);
-        cpp_next(ctx, tk);
-    }
-
-    tk->kind = TK_eom;
-    cpp_token_array_append(&body, tk);
-
     if (old_m != NULL) {
         if (HAS_FLAG(old_m->flags, CPP_MACRO_GUARD)) {
             cpp_warn(ctx, tk, "'%s' already defined as header guard macro",
@@ -1543,9 +1554,11 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         }
         old_m->flags = flags;
         old_m->fileno = ctx->stream->file->no;
-        cpp_token_array_cleanup(&old_m->body);
-        old_m->body = body;
+        cpp_token_array_clear(&old_m->body);
+        parse_macro_body(ctx, tk, &old_m->body, param, n_param, flags);
+        m = old_m;
     } else {
+        parse_macro_body(ctx, tk, &body, param, n_param, flags);
         m = macro_new(name, flags, ctx->stream->file->no, body);
         if (HAS_FLAG(flags, CPP_MACRO_FUNC)) {
             m->param = param;
@@ -1554,7 +1567,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         hash_table_insert(&ctx->macro, name, m);
     }
 
-    body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
+    m->body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
 }
 
 static void do_undef(cpp_context *ctx, cpp_token *tk)
