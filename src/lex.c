@@ -394,7 +394,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         }
 
         /* number */
-        if (isdigit(*s->p) || (*s->p == '.' && isdigit(s->p[1]))) {
+        if (isdigit(*s->p)) {
             cpp_lex_number(s, tk);
             tk->kind = TK_number;
             return;
@@ -406,6 +406,20 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
             cpp_lex_string(s, tk, ch);
             tk->kind = ch == '"' ? TK_string : TK_char_const;
             return;
+        }
+
+        /* number or punctuator */
+        if (*s->p == '.') {
+            tk->p = s->p++;
+            CHECK_ESCNL(s, tk);
+            if (isdigit(*s->p)) {
+                s->p = tk->p;
+                cpp_lex_number(s, tk);
+                tk->kind = TK_number;
+                return;
+            }
+            /* else fallthrough to scan punctuator */
+            s->p = tk->p;
         }
 
         /* punctuator */
