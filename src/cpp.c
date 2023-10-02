@@ -735,7 +735,6 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
 
     if (HAS_FLAG(hash.flags, CPP_TOKEN_BOF)) {
         cpp_next(ctx, tk);
-        assert(AT_BOL(tk));
         if (tk->kind != '#')
             goto putback;
         hash = *tk;
@@ -1197,7 +1196,6 @@ static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk)
     cpp_token_array_append(&ctx->line, tk);
     tk->kind = kind;
 
-    assert(ctx->file_macro == NULL);
     return ctx->line.tokens;
 }
 
@@ -1458,7 +1456,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
         subst(ctx, m, &macro_tk, NULL, &ms->tok);
     }
 
-    assert(ms);
     ms->p = ms->tok.tokens;
 
     ms->tok.tokens[0].flags |= macro_tk.flags;
