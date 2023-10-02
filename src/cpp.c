@@ -3,6 +3,7 @@
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
  * - Too much assert() calls after allocation.
+ * - cpp_buffer should be rewritten, it sucks and may messed up in rarer cases.
  *
  * Forever issues:
  * - Diagnostic.
