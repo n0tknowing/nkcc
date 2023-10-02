@@ -556,7 +556,8 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
 
     pathref = search_include_path(name, cwd, &sb);
     if (pathref == 0)
-        cpp_error(ctx, &pathtk, "unable to open '%s': %s", name, strerror(errno));
+        cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
+                  strerror(errno));
 
     if (is_sys)
         name = string_ref_ptr(pathref);
@@ -576,7 +577,8 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
         nameref = string_ref_newlen(name, len);
         file = cpp_file_open2(pathref, nameref, &sb);
         if (file == NULL)
-            cpp_error(ctx, &pathtk, "unable to open '%s': %s", name, strerror(errno));
+            cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
+                      strerror(errno));
     }
 
     cpp_stream_push(ctx, file);
@@ -731,9 +733,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
         ctx->stream->cond->flags |= CPP_COND_SKIP;
         cpp_next(ctx, tk);
         cond_stack_skip(ctx, tk);
-    }
-
-    if (HAS_FLAG(hash.flags, CPP_TOKEN_BOF)) {
+    } else if (HAS_FLAG(hash.flags, CPP_TOKEN_BOF)) {
         cpp_next(ctx, tk);
         if (tk->kind != '#')
             goto putback;
@@ -808,8 +808,9 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
     cpp_next(ctx, tk);
     if (tk->kind == TK_eof) {
         guard_name = ctx->stream->cond->guard_name;
-        if (HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD) &&
-            !HAS_FLAG(ctx->stream->cond->flags, CPP_COND_ELSIF)) {
+        if (ctx->stream->cond->prev == NULL
+            && HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD)
+            && !HAS_FLAG(ctx->stream->cond->flags, CPP_COND_ELSIF)) {
             m = hash_table_lookup(&ctx->macro, guard_name);
             if (m != NULL) {
                 pathref = ctx->stream->file->path;
@@ -832,9 +833,9 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
         hash_table_insert(&ctx->macro, name, m);            \
     } while (0)
 
+static cpp_token_array dummy;
 static cpp_macro *macro_new(string_ref name, uchar flags, ushort fileno,
                             cpp_token_array body);
-static cpp_token_array dummy;
 
 static void builtin_macro_setup(cpp_context *ctx)
 {
