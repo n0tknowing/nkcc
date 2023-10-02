@@ -1,7 +1,5 @@
 /* Current issues:
  * - Token spacing.
- * - I'm not satisfied with the current implementation of builtin_macro_setup()
- *   and expand_builtin() because these don't handle non-dynamic builtin macros.
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
  * - Too much assert() calls after allocation.
@@ -25,9 +23,8 @@ static uchar expand(cpp_context *ctx, cpp_token *tk);
 static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
 static cpp_directive_kind get_directive_kind(const uchar *buf, uint len);
 static void skip_line(cpp_context *ctx, cpp_token *tk);
-static void parse_macro_body(cpp_context *ctx, cpp_token *tk,
-                             cpp_token_array *body, string_ref *param,
-                             uint n_param, uchar flags);
+static void do_define(cpp_context *ctx, cpp_token *tk);
+static void do_undef(cpp_context *ctx, cpp_token *tk);
 
 
 /* ------------------------------------------------------------------------ */
@@ -160,6 +157,68 @@ void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp)
 
     if (!first)
         fputc('\n', fp);
+}
+
+void cpp_macro_define(cpp_context *ctx, const char *in)
+{
+    cpp_token tk;
+    cpp_stream s;
+    const char *p;
+    uint len1, len2;
+    const uchar *sp;
+    cpp_file *f = cpp_file_no(0);
+
+    len1 = strlen(in);
+    p = memchr(in, '=', len1);
+    if (p != NULL) { /* replace the first '=' to a single whitespace */
+        len2 = (uint)(p - in);
+        sp = cpp_buffer_append(ctx, (const uchar *)in, len2);
+        cpp_buffer_append_ch(ctx, ' ');
+        p++; len2 = (uint)(in + len1 - p);
+        cpp_buffer_append(ctx, (const uchar *)p, len2);
+    } else { /* append " 1" */
+        sp = cpp_buffer_append(ctx, (const uchar *)in, len1);
+        cpp_buffer_append(ctx, (const uchar *)" 1", 2);
+    }
+
+    cpp_buffer_append(ctx, (const uchar *)"\n\0", 2);
+
+    s.flags = 0;
+    s.lineno = 1;
+    s.pplineno_loc = s.pplineno_val = 0;
+    s.fname = s.ppfname = string_ref_ptr(f->name);
+    s.p = sp;
+    s.file = f;
+    s.prev = NULL;
+    s.cond = NULL;
+
+    ctx->stream = &s;
+    do_define(ctx, &tk);
+    ctx->stream = NULL;
+}
+
+void cpp_macro_undefine(cpp_context *ctx, const char *in)
+{
+    cpp_token tk;
+    cpp_stream s;
+    const uchar *sp;
+    cpp_file *f = cpp_file_no(0);
+
+    sp = cpp_buffer_append(ctx, (const uchar *)in, strlen(in));
+    cpp_buffer_append(ctx, (const uchar *)"\n\0", 2);
+
+    s.flags = 0;
+    s.lineno = 1;
+    s.pplineno_loc = s.pplineno_val = 0;
+    s.fname = s.ppfname = string_ref_ptr(f->name);
+    s.p = sp;
+    s.file = f;
+    s.prev = NULL;
+    s.cond = NULL;
+
+    ctx->stream = &s;
+    do_undef(ctx, &tk);
+    ctx->stream = NULL;
 }
 
 /* ---- cpp_buffer -------------------------------------------------------- */

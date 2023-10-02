@@ -303,6 +303,8 @@ void cpp_context_setup(cpp_context *ctx);
 void cpp_context_cleanup(cpp_context *ctx);
 void cpp_run(cpp_context *ctx, cpp_file *file);
 void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp);
+void cpp_macro_define(cpp_context *ctx, const char *in);
+void cpp_macro_undefine(cpp_context *ctx, const char *in);
 void cpp_search_path_append(cpp_context *ctx, const char *dirpath);
 const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize);
 const uchar *cpp_buffer_append_ch(cpp_context *ctx, uchar ch);

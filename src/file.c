@@ -126,7 +126,7 @@ void cpp_file_close(cpp_file *file)
 
 cpp_file *cpp_file_no(ushort no)
 {
-    if (no != 0 && no < g_file_count)
+    if (no < g_file_count)
         return &g_files[no];
     errno = EINVAL;
     return NULL;

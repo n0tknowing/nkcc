@@ -3,32 +3,44 @@
 static void usage(int exit_code)
 {
     puts("Usage:");
-    puts("  cpp [-EP] [-I DIR] [-o OUT_FILE] FILE");
+    puts("  cpp [-EP] [-D MACRO=VAL] [-I DIR] [-o OUT_FILE] [-U MACRO] FILE");
     puts("");
     puts("Options:");
-    puts("  -o OUT_FILE     Place the output into OUT_FILE");
+    puts("  -D MACRO=VAL    Define MACRO to VAL (or 1 if VAL omitted)");
     puts("  -E              Preprocess only");
     puts("  -I DIR          Append DIR to the include search path");
     puts("  -P              Disable linemarker output in -E mode");
+    puts("  -U MACRO        Undefine MACRO");
+    puts("  -o OUT_FILE     Place the output into OUT_FILE");
     exit(exit_code);
 }
 
 int main(int argc, char **argv)
 {
+    int opt;
     FILE *fp;
+    uchar opt_E;
     cpp_context ctx;
-    int opt, opt_e = 0;
     const char *in, *out = NULL;
 
+    opt_E = 0;
     cpp_context_setup(&ctx);
 
-    while ((opt = getopt(argc, argv, ":EI:Po:")) != EOF) {
+    while ((opt = getopt(argc, argv, ":D:EI:PU:o:")) != EOF) {
         switch (opt) {
+        case 'D':
+            cpp_macro_define(&ctx, optarg);
+            break;
         case 'E':
-            opt_e = 1;
+            opt_E = 1;
             break;
         case 'I':
             cpp_search_path_append(&ctx, optarg);
+            break;
+        case 'P':
+            break;
+        case 'U':
+            cpp_macro_undefine(&ctx, optarg);
             break;
         case 'o':
             if (out != NULL) {
@@ -39,8 +51,6 @@ int main(int argc, char **argv)
             }
             out = (const char *)strdup(optarg);
             assert(out);
-            break;
-        case 'P':
             break;
         default:
             usage(1);
@@ -79,7 +89,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (opt_e) {
+    if (opt_E) {
         cpp_print(&ctx, f, fp);
     } else {
         cpp_run(&ctx, f);
