@@ -283,10 +283,13 @@ const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize)
  * Can read token from the result of a macro expansion. */
 static void cpp_next(cpp_context *ctx, cpp_token *tk)
 {
+    macro_stack *ms;
+    uchar was_macro = 0;
+
     /* Backtrack */
     if (unlikely(ctx->temp.n != 0)) {
         uint i;
-        *tk = *ctx->temp.tokens;
+        *tk = ctx->temp.tokens[0];
         for (i = 1; i < ctx->temp.n; i++)
             ctx->temp.tokens[i - 1] = ctx->temp.tokens[i];
         ctx->temp.n--;
@@ -294,32 +297,38 @@ static void cpp_next(cpp_context *ctx, cpp_token *tk)
     }
 
     if (ctx->argstream != NULL) {
-        macro_stack *macro = ctx->argstream->macro;
-        while (macro != NULL) {
-            const cpp_token *t = macro->p;
+        ms = ctx->argstream->macro;
+        while (ms != NULL) {
+            const cpp_token *t = ms->p;
             if (t->kind != TK_eom) {
                 *tk = *t;
                 ctx->argstream->macro->p++;
-                return;
+                goto done;
             }
+            was_macro = PREV_SPACE(t);
             macro_stack_pop(ctx);
-            macro = ctx->argstream->macro;
+            ms = ctx->argstream->macro;
         }
         *tk = *ctx->argstream->p++;
     } else {
-        macro_stack *macro = ctx->file_macro;
-        while (ctx->file_macro != NULL) {
-            const cpp_token *t = macro->p;
+        ms = ctx->file_macro;
+        while (ms != NULL) {
+            const cpp_token *t = ms->p;
             if (t->kind != TK_eom) {
                 *tk = *t;
                 ctx->file_macro->p++;
-                return;
+                goto done;
             }
+            was_macro = PREV_SPACE(t);
             macro_stack_pop(ctx);
-            macro = ctx->file_macro;
+            ms = ctx->file_macro;
         }
         cpp_lex_scan(ctx->stream, tk);
     }
+
+done:
+    if (was_macro)
+        tk->flags |= CPP_TOKEN_SPACE;
 }
 
 static void cpp_next_nonl(cpp_context *ctx, cpp_token *tk)
