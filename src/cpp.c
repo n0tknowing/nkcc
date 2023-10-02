@@ -3,7 +3,6 @@
  * - Should not use fixed-size buffer when splicing a token.
  * - Should the macro stuff has its own file? Preferably named macro.c
  * - Too much assert() calls after allocation.
- * - cpp_buffer should be rewritten, it sucks and may messed up in rarer cases.
  *
  * Forever issues:
  * - Diagnostic.
@@ -224,66 +223,55 @@ void cpp_macro_undefine(cpp_context *ctx, const char *in)
 
 /* ---- cpp_buffer -------------------------------------------------------- */
 
-static cpp_buffer *cpp_buffer_new(uint cap)
-{
-    cpp_buffer *buf = malloc(sizeof(cpp_buffer));
-    assert(buf);
-    buf->prev = NULL;
-    buf->len = 0;
-    buf->cap = cap;
-    buf->data = malloc(cap);
-    assert(buf->data);
-    return buf;
-}
-
 static void cpp_buffer_cleanup(cpp_context *ctx)
 {
-    while (ctx->buf != NULL) {
-        cpp_buffer *prev = ctx->buf->prev;
-        free(ctx->buf->data);
-        free(ctx->buf);
-        ctx->buf = prev;
-    }
+    if (ctx->buf.data != NULL)
+        munmap(ctx->buf.data, CPP_BUFFER_CAPA);
+    ctx->buf.data = NULL;
 }
 
 const uchar *cpp_buffer_append_ch(cpp_context *ctx, uchar ch)
 {
     const uchar *r;
-    cpp_buffer *buf;
 
-    if (ctx->buf == NULL) {
-        ctx->buf = cpp_buffer_new(4096);
-    } else if (ctx->buf->len >= ctx->buf->cap) {
-        buf = cpp_buffer_new(4096);
-        buf->prev = ctx->buf;
-        ctx->buf = buf;
+    if (ctx->buf.data == NULL) {
+        ctx->buf.data = mmap(NULL, CPP_BUFFER_CAPA, PROT_READ|PROT_WRITE,
+                             MAP_PRIVATE|MAP_ANON, -1, 0);
+        if (ctx->buf.data == MAP_FAILED)
+            cpp_error(ctx, NULL, "cpp_buffer fails to mmap: %s (internal)",
+                      strerror(errno));
+        r = ctx->buf.data;
+    } else if (ctx->buf.len + sizeof(uchar) >= CPP_BUFFER_CAPA) {
+        cpp_error(ctx, NULL, "cpp_buffer out of memory (internal)");
+    } else {
+        r = ctx->buf.data + ctx->buf.len;
     }
 
-    buf = ctx->buf;
-    r = buf->data + buf->len;
-    buf->data[buf->len++] = ch;
+    ctx->buf.data[ctx->buf.len++] = ch;
     return r;
 }
 
 const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize)
 {
     const uchar *r;
-    cpp_buffer *buf;
 
     if (unlikely(psize == 1)) {
         return cpp_buffer_append_ch(ctx, *p);
-    } else if (ctx->buf == NULL) {
-        ctx->buf = cpp_buffer_new(4096);
-    } else if (ctx->buf->len + psize >= ctx->buf->cap) {
-        buf = cpp_buffer_new(4096);
-        buf->prev = ctx->buf;
-        ctx->buf = buf;
+    } else if (ctx->buf.data == NULL) {
+        ctx->buf.data = mmap(NULL, CPP_BUFFER_CAPA, PROT_READ|PROT_WRITE,
+                             MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+        if (ctx->buf.data == MAP_FAILED)
+            cpp_error(ctx, NULL, "cpp_buffer fails to mmap: %s (internal)",
+                      strerror(errno));
+        r = ctx->buf.data;
+    } else if (ctx->buf.len + psize >= CPP_BUFFER_CAPA) {
+        cpp_error(ctx, NULL, "cpp_buffer out of memory (internal)");
+    } else {
+        r = ctx->buf.data + ctx->buf.len;
     }
 
-    buf = ctx->buf;
-    r = buf->data + buf->len;
-    memcpy(buf->data + buf->len, p, psize);
-    buf->len += psize;
+    memcpy(ctx->buf.data + ctx->buf.len, p, psize);
+    ctx->buf.len += psize;
     return r;
 }
 
@@ -347,7 +335,7 @@ static void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    if (ctx->stream != NULL)
+    if (ctx->stream != NULL && tk != NULL)
         fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
                                                     get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;31merror:\x1b[0m ");
@@ -362,7 +350,7 @@ static void cpp_warn(cpp_context *ctx, cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
-    if (ctx->stream != NULL)
+    if (ctx->stream != NULL && tk != NULL)
         fprintf(stderr, "\x1b[1;29m%s:%u:\x1b[0m ", ctx->stream->ppfname,
                                                     get_lineno_tok(ctx, tk));
     fprintf(stderr, "\x1b[1;35mwarning:\x1b[0m ");

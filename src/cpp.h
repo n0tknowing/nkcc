@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -79,6 +80,9 @@ typedef unsigned int tkchar;
 #define CPP_MACRO_EXPR     16 /* this macro is used in #if/#elif expression */
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
+
+/* limits for cpp_buffer */
+#define CPP_BUFFER_CAPA     (1U << 24) /* 16MiB */
 
 
 /* ---- enums -------------------------------------------------------------- */
@@ -238,8 +242,6 @@ typedef struct macro_stack {
 typedef struct cpp_buffer {
     uchar *data;
     uint len;
-    uint cap;
-    struct cpp_buffer *prev;
 } cpp_buffer;
 
 typedef struct cpp_stream {
@@ -289,7 +291,7 @@ typedef struct {
     ht_t macro;
     ht_t cached_file;
     ht_t guarded_file;
-    cpp_buffer *buf;
+    cpp_buffer buf;
     const uchar *ppdate;
     const uchar *pptime;
     /* add more... */
