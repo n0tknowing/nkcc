@@ -877,11 +877,9 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
                 hash_table_insert(&ctx->guarded_file, pathref, m);
             }
         }
-    } else {
-        /* Put back the token, no need to put back the previous '\n' */
-        cpp_token_array_append(&ctx->temp, tk);
     }
 
+    cpp_token_array_append(&ctx->temp, tk);
     cond_stack_pop(ctx);
 }
 
@@ -1725,6 +1723,8 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
     uint len;
     uchar buf[32];
     cpp_token hash;
+    cpp_file *file;
+    string_ref pathref;
     cpp_directive_kind dkind;
 
     while (1) {
@@ -1734,9 +1734,20 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
                 hash = ctx->stream->cond->token;
                 cpp_error(ctx, &hash, "unterminated %s", cond_stack_name(ctx));
             }
+            file = ctx->stream->file;
+            pathref = file->path;
+            if (hash_table_lookup(&ctx->guarded_file, pathref)) {
+                /* We know that the file is guarded by header guarded, so we
+                 * can close it immediately. */
+                cpp_file_close(file);
+            } else {
+                /* Cache the file, no more cpp_file_open2() if the file is
+                 * #included multiple times. */
+                hash_table_insert(&ctx->cached_file, pathref, file);
+            }
             cpp_stream_pop(ctx);
             if (ctx->stream == NULL)
-                return;
+                return; /* No more input left. */
             continue;
         } else if (tk->kind == '\n') {
             continue;
