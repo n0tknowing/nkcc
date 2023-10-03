@@ -1,7 +1,6 @@
 /* Current issues:
  * - Token spacing.
  * - Should not use fixed-size buffer when splicing a token.
- * - Should the macro stuff has its own file? Preferably named macro.c
  * - Too much assert() calls after allocation.
  *
  * Forever issues:
