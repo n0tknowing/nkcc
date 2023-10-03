@@ -53,6 +53,7 @@ int main(int argc, char **argv)
             assert(out);
             break;
         default:
+            cpp_context_cleanup(&ctx);
             usage(1);
             break;
         }
@@ -61,8 +62,10 @@ int main(int argc, char **argv)
     argc -= optind;
     argv += optind;
 
-    if (argc == 0)
+    if (argc == 0) {
+        cpp_context_cleanup(&ctx);
         usage(1);
+    }
 
     if (out != NULL) {
         fp = fopen(out, "w+");
