@@ -17,8 +17,7 @@ void cpp_file_cleanup(void)
 
     for (i = 1; i < g_file_count; i++) {
         cpp_file *f = &g_files[i];
-        if (!HAS_FLAG(f->flags, CPP_FILE_FREED))
-            free(f->data);
+        free(f->data);
     }
 }
 
@@ -116,12 +115,6 @@ cpp_file *cpp_file_open2(string_ref _path, string_ref name, struct stat *sb)
 
     errno = 0;
     return file;
-}
-
-void cpp_file_close(cpp_file *file)
-{
-    free(file->data); file->data = NULL;
-    file->flags |= CPP_FILE_FREED;
 }
 
 cpp_file *cpp_file_no(ushort no)

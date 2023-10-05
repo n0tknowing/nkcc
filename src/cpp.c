@@ -2,6 +2,9 @@
  * - Token spacing.
  * - Should not use fixed-size buffer when splicing a token.
  * - Too much assert() calls after allocation.
+ * - cond_stack, macro_stack, argstream, and cpp_stream can be reused to avoid
+ *   small object allocations.
+ * - Predefined macros such as __STDC__ and __STDC_VERSION__.
  *
  * Forever issues:
  * - Diagnostic.
@@ -17,8 +20,8 @@ static void macro_stack_pop(cpp_context *ctx);
 static void cpp_buffer_cleanup(cpp_context *ctx);
 static void cond_stack_cleanup(cpp_context *ctx);
 static void macro_free(void *p);
-static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk);
-static uchar expand(cpp_context *ctx, cpp_token *tk);
+static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr);
+static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr);
 static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
 static cpp_directive_kind get_directive_kind(const uchar *buf, uint len);
 static void skip_line(cpp_context *ctx, cpp_token *tk);
@@ -37,8 +40,10 @@ static string_ref g__VA_ARGS__,
                   g__TIMESTAMP__,
                   g_defined;
 
-static char *g_include_search_path[128];
+static char *g_include_search_path[CPP_SEARCHPATH_MAX];
 static int g_include_search_path_count;
+static cond_expr g_cond_expr[CPP_CONDEXPR_MAX];
+static int g_cond_expr_count;
 
 /* ------------------------------------------------------------------------ */
 
@@ -112,7 +117,7 @@ void cpp_search_path_append(cpp_context *ctx, const char *dirpath)
 {
     char *path;
 
-    if (g_include_search_path_count == 128)
+    if (g_include_search_path_count == CPP_SEARCHPATH_MAX)
         cpp_error(ctx, NULL, "too many #include search paths");
 
     path = strdup(dirpath);
@@ -225,7 +230,7 @@ void cpp_macro_undefine(cpp_context *ctx, const char *in)
 static void cpp_buffer_cleanup(cpp_context *ctx)
 {
     if (ctx->buf.data != NULL)
-        munmap(ctx->buf.data, CPP_BUFFER_CAPA);
+        munmap(ctx->buf.data, CPP_BUFFER_MAX);
     ctx->buf.data = NULL;
 }
 
@@ -234,13 +239,13 @@ const uchar *cpp_buffer_append_ch(cpp_context *ctx, uchar ch)
     const uchar *r;
 
     if (ctx->buf.data == NULL) {
-        ctx->buf.data = mmap(NULL, CPP_BUFFER_CAPA, PROT_READ|PROT_WRITE,
+        ctx->buf.data = mmap(NULL, CPP_BUFFER_MAX, PROT_READ|PROT_WRITE,
                              MAP_PRIVATE|MAP_ANON, -1, 0);
         if (ctx->buf.data == MAP_FAILED)
             cpp_error(ctx, NULL, "cpp_buffer fails to mmap: %s (internal)",
                       strerror(errno));
         r = ctx->buf.data;
-    } else if (ctx->buf.len + sizeof(uchar) >= CPP_BUFFER_CAPA) {
+    } else if (ctx->buf.len + sizeof(uchar) >= CPP_BUFFER_MAX) {
         cpp_error(ctx, NULL, "cpp_buffer out of memory (internal)");
     } else {
         r = ctx->buf.data + ctx->buf.len;
@@ -257,13 +262,13 @@ const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize)
     if (unlikely(psize == 1)) {
         return cpp_buffer_append_ch(ctx, *p);
     } else if (ctx->buf.data == NULL) {
-        ctx->buf.data = mmap(NULL, CPP_BUFFER_CAPA, PROT_READ|PROT_WRITE,
+        ctx->buf.data = mmap(NULL, CPP_BUFFER_MAX, PROT_READ|PROT_WRITE,
                              MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
         if (ctx->buf.data == MAP_FAILED)
             cpp_error(ctx, NULL, "cpp_buffer fails to mmap: %s (internal)",
                       strerror(errno));
         r = ctx->buf.data;
-    } else if (ctx->buf.len + psize >= CPP_BUFFER_CAPA) {
+    } else if (ctx->buf.len + psize >= CPP_BUFFER_MAX) {
         cpp_error(ctx, NULL, "cpp_buffer out of memory (internal)");
     } else {
         r = ctx->buf.data + ctx->buf.len;
@@ -393,14 +398,14 @@ static void do_error(cpp_context *ctx, cpp_token *tk)
 
 static void do_line(cpp_context *ctx, cpp_token *tk)
 {
+    ulong val;
     cpp_token *tok;
-    unsigned long val;
     const uchar *fname;
     uint len, max = sizeof("2147483648");
     uchar buf[PATH_MAX + 1] = {0}, *end = NULL;
 
     cpp_next(ctx, tk);
-    tok = expand_line(ctx, tk);
+    tok = expand_line(ctx, tk, 0);
 
     if (tok->kind != TK_number) {
         if (tok->kind == '-' && tok[1].kind == TK_number)
@@ -544,7 +549,7 @@ static const char *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
 {
     uint len = 0;
     const char *path = (const char *)buf;
-    cpp_token *tok = expand_line(ctx, tk);
+    cpp_token *tok = expand_line(ctx, tk, 0);
 
     if (tok->kind == TK_string) {
         len = cpp_token_splice(tok, buf, PATH_MAX);
@@ -633,7 +638,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
 
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
-        nameref = string_ref_newlen(name, len);
+        nameref = string_ref_new(name);
         file = cpp_file_open2(pathref, nameref, &sb);
         if (file == NULL)
             cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
@@ -649,13 +654,13 @@ include_error:
 
 /* --- #if stuff ---------------------------------------------------------- */
 
-static void cond_stack_push(cpp_context *ctx, cpp_token *tk)
+static void cond_stack_push(cpp_context *ctx, cpp_token tk)
 {
     cond_stack *cs = malloc(sizeof(cond_stack));
     assert(cs);
     cs->flags = 0;
     cs->guard_name = 0;
-    cs->token = *tk;
+    cs->token = tk;
     cs->prev = ctx->stream->cond;
     ctx->stream->cond = cs;
 }
@@ -739,6 +744,515 @@ static void cond_stack_skip(cpp_context *ctx, cpp_token *tk)
         cpp_error(ctx, tk, "unterminated conditional directive");
 }
 
+static cond_expr *cond_expr_new(cpp_context *ctx, cpp_token tk)
+{
+    cond_expr *ce;
+
+    if (unlikely(g_cond_expr_count == CPP_CONDEXPR_MAX))
+        cpp_error(ctx, &tk, "too many ast nodes in a #if/#elif expression");
+
+    ce = &g_cond_expr[g_cond_expr_count];
+    g_cond_expr_count++;
+    return ce;
+}
+
+static void cond_expr_reset(void)
+{
+    if (g_cond_expr_count > 0) {
+        memset(g_cond_expr, 0, g_cond_expr_count * sizeof(cond_expr));
+        g_cond_expr_count = 0;
+    }
+}
+
+/* Note that the function relies on C99 feature which is able to read inactive
+ * union member (type punning). */
+static cond_expr_value cond_expr_eval2(cpp_context *ctx, cond_expr *expr)
+{
+    tkchar op;
+    cpp_token tk;
+    cond_expr_value v = {0}, l, r;
+
+redo_no_recur:
+    switch (expr->kind) {
+    case CEXPR_VALUE:
+        v = expr->v.val;
+        break;
+    case CEXPR_UNARY:
+        tk = expr->v.unary.op;
+        op = tk.kind;
+        switch (op) {
+        case '+':
+            expr = expr->v.unary.opr;
+            goto redo_no_recur;
+        case '-':
+            v = cond_expr_eval2(ctx, expr->v.unary.opr);
+            if (v.is_unsigned) v.v.u = -v.v.u;
+            else v.v.s = -v.v.s;
+            break;
+        case '!':
+            v = cond_expr_eval2(ctx, expr->v.unary.opr);
+            if (v.is_unsigned) v.v.u = !v.v.u;
+            else v.v.s = !v.v.s;
+            v.is_unsigned = 1;
+            break;
+        case '~':
+            v = cond_expr_eval2(ctx, expr->v.unary.opr);
+            if (v.is_unsigned) v.v.u = ~v.v.u;
+            else v.v.s = ~v.v.s;
+            break;
+        }
+        break;
+    case CEXPR_BINARY:
+        tk = expr->v.binary.op;
+        op = tk.kind;
+        if (op == TK_and || op == TK_or) {
+            l = cond_expr_eval2(ctx, expr->v.binary.lhs);
+            v.v.u = (!l.is_unsigned && l.v.s) || (l.is_unsigned && l.v.u);
+            v.is_unsigned = 1;
+            if (v.v.u == (op == TK_and)) {
+                r = cond_expr_eval2(ctx, expr->v.binary.rhs);
+                v.v.u = (!r.is_unsigned && r.v.s) || (r.is_unsigned && r.v.u);
+            }
+            break;
+        }
+        l = cond_expr_eval2(ctx, expr->v.binary.lhs);
+        r = cond_expr_eval2(ctx, expr->v.binary.rhs);
+        switch (op) {
+        case '*':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u * r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s * r.v.s;
+            }
+            break;
+        case '/':
+            if ((!r.is_unsigned && l.v.s == 0) ||
+                (r.is_unsigned && r.v.u == 0))
+                cpp_error(ctx, &tk, "division by zero");
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u / r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s / r.v.s;
+            }
+            break;
+        case '%':
+            if ((!r.is_unsigned && l.v.s == 0) ||
+                (r.is_unsigned && r.v.u == 0))
+                cpp_error(ctx, &tk, "division by zero");
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u % r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s % r.v.s;
+            }
+            break;
+        case '+':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u + r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s + r.v.s;
+            }
+            break;
+        case '-':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u - r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s - r.v.s;
+            }
+            break;
+        case TK_lshift:
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u << r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s << r.v.s;
+            }
+            break;
+        case TK_rshift:
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u >> r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s >> r.v.s;
+            }
+            break;
+        case '<':
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u < r.v.u;
+            else
+                v.v.s = l.v.s < r.v.s;
+            break;
+        case '>':
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u > r.v.u;
+            else
+                v.v.s = l.v.s > r.v.s;
+            break;
+        case TK_le:
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u <= r.v.u;
+            else
+                v.v.s = l.v.s <= r.v.s;
+            break;
+        case TK_ge:
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u >= r.v.u;
+            else
+                v.v.s = l.v.s >= r.v.s;
+            break;
+        case TK_eq:
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u == r.v.u;
+            else
+                v.v.s = l.v.s == r.v.s;
+            break;
+        case TK_ne:
+            v.is_unsigned = 1;
+            if (l.is_unsigned || r.is_unsigned)
+                v.v.u = l.v.u != r.v.u;
+            else
+                v.v.s = l.v.s != r.v.s;
+            break;
+        case '&':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u & r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s & r.v.s;
+            }
+            break;
+        case '^':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u ^ r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s ^ r.v.s;
+            }
+            break;
+        case '|':
+            if (l.is_unsigned || r.is_unsigned) {
+                v.is_unsigned = 1;
+                v.v.u = l.v.u | r.v.u;
+            } else {
+                v.is_unsigned = 0;
+                v.v.s = l.v.s | r.v.s;
+            }
+            break;
+        default:
+            break;
+        }
+        break;
+    case CEXPR_TERNARY:
+        v = cond_expr_eval2(ctx, expr->v.ternary.cnd);
+        if ((!v.is_unsigned && v.v.s) || (v.is_unsigned && v.v.u))
+            v = cond_expr_eval2(ctx, expr->v.ternary.vit);
+        else
+            v = cond_expr_eval2(ctx, expr->v.ternary.vif);
+        break;
+    }
+
+    return v;
+}
+
+#define CEXPR_UNARY_PRIO 12
+
+static uchar cond_expr_prio(uchar tk_kind)
+{
+    switch (tk_kind) {
+    case '[':
+    case ']':
+    case '.':
+    case TK_arrow:
+    case TK_incr: /* Postfix */
+    case TK_decr: /* Postfix */
+    case '=':
+    case TK_asg_mul:
+    case TK_asg_div:
+    case TK_asg_mod:
+    case TK_asg_add:
+    case TK_asg_sub:
+    case TK_asg_lshift:
+    case TK_asg_rshift:
+    case TK_asg_band:
+    case TK_asg_bxor:
+    case TK_asg_bor:
+        /* Invalid */
+        return 255;
+    case '*':
+    case '/':
+    case '%':
+        return 11;
+    case '+':
+    case '-':
+        return 10;
+    case TK_lshift:
+    case TK_rshift:
+        return 9;
+    case '<':
+    case '>':
+    case TK_le:
+    case TK_ge:
+        return 8;
+    case TK_eq:
+    case TK_ne:
+        return 7;
+    case '&':
+        return 6;
+    case '^':
+        return 5;
+    case '|':
+        return 4;
+    case TK_and:
+        return 3;
+    case TK_or:
+        return 2;
+    case '?':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static cond_expr *cond_expr_number(cpp_context *ctx, cpp_token *tok,
+                                   cpp_token **end)
+{
+    ulong val;
+    int base = 10;
+    const uchar *p;
+    cond_expr *ce = NULL;
+    cond_expr_value v = {0};
+    uchar buf[32], *endp = NULL;
+    uint len, max = sizeof("18446744073709551616ULL");
+
+    len = cpp_token_splice(tok, buf, max + 1);
+    if (len > max)
+        cpp_error(ctx, tok, "integer constant too large");
+
+    buf[len] = 0;
+    p = buf;
+
+    if (*p == '0') {
+        p++;
+        if (*p == 'x' || *p == 'X')
+            base = 16;
+        else if ((uint)*p - '0' < 8)
+            base = 8;
+    }
+
+    val = strtoul((const char *)buf, (char **)&endp, base);
+    if (errno != 0 && val == ULONG_MAX)
+        cpp_error(ctx, tok, "integer constant too large");
+
+    if (endp != NULL && *endp != '\0') {
+        p = endp;
+        if (*p == 'u' || *p == 'U') {
+            v.is_unsigned = 1;
+            p++;
+        }
+        if (*p == 'l' || *p == 'L') {
+            p++;
+            if (*p == p[-1])
+                p++;
+            if (*p == 'u' || *p == 'U') {
+                v.is_unsigned = 1;
+                p++;
+            }
+        }
+        if (*p != '\0') {
+            if (base == 8 && ((uint)*p - '0') < 10)
+                cpp_error(ctx, tok, "invalid octal constant");
+            cpp_error(ctx, tok, "invalid integer constant suffix '%s'", endp);
+        }
+    }
+
+    if (!v.is_unsigned) {
+        if (val > LONG_MAX)
+            cpp_warn(ctx, tok, "integer constant '%lu' too large for "
+                               "'signed long'");
+    }
+
+    v.v.u = val;
+    ce = cond_expr_new(ctx, *tok);
+    ce->kind = CEXPR_VALUE;
+    ce->v.val = v;
+    *end = tok + 1;
+    return ce;
+}
+
+static cond_expr *cond_expr_parse(cpp_context *ctx, cpp_token *tok,
+                                  cpp_token **end, uchar priority)
+{
+    uint len;
+    uchar prio;
+    uchar buf[8];
+    cpp_token op;
+    cond_expr *ce = NULL;
+    cond_expr *cnd, *opr1, *opr2;
+
+    switch (tok->kind) {
+    case '(':
+        ce = cond_expr_parse(ctx, ++tok, end, 0);
+        tok = *end;
+        if (tok->kind != ')')
+            cpp_error(ctx, tok, "unterminated #if/#elif subexpression");
+        else if (ce == NULL)
+            cpp_error(ctx, tok, "empty subexpression");
+        tok++;
+        break;
+    case '+':
+    case '-':
+    case '~':
+    case '!':
+        op = *tok;
+        opr1 = cond_expr_parse(ctx, ++tok, end, CEXPR_UNARY_PRIO);
+        tok = *end;
+        if (opr1 == NULL)
+            cpp_error(ctx, tok, "missing expression in #if/#elif");
+        ce = cond_expr_new(ctx, op);
+        ce->kind = CEXPR_UNARY;
+        ce->v.unary.op = op;
+        ce->v.unary.opr = opr1;
+        break;
+    case TK_identifier:
+        tok->kind = TK_number;
+        tok->p = cpp_buffer_append_ch(ctx, '0');
+        tok->length = 1;
+        /* fallthrough */
+    case TK_number:
+        if (HAS_FLAG(tok->flags, CPP_TOKEN_FLNUM))
+            cpp_error(ctx, tok, "floating constant cannot be used as a value "
+                                "in a #if/#elif expression");
+        ce = cond_expr_number(ctx, tok, end);
+        tok = *end;
+        break;
+    case TK_char_const:
+        break;
+    case TK_string:
+        cpp_error(ctx, tok, "string literal cannot be used as a value in a"
+                            "#if/#elif expression");
+        break;
+    case '&':
+    case '*':
+    case TK_incr: /* Prefix */
+    case TK_decr: /* Prefix */
+        /* sizeof is not treated as C operator */
+        goto invalid_operator;
+    default:
+        goto done;
+    }
+
+    while (tok->kind != TK_eof) {
+        prio = cond_expr_prio(tok->kind);
+        if (prio == 0 || priority >= prio) {
+            break;
+        } else if (prio == 255) {
+invalid_operator:
+            len = cpp_token_splice(tok, buf, sizeof(buf));
+            cpp_error(ctx, tok, "operator '%.*s' cannot be used in a #if/#elif"
+                                " expression", len, buf);
+        }
+        if (tok->kind == '?') {
+            if (ce == NULL)
+                cpp_error(ctx, tok, "missing expression before '?'");
+            cnd = ce;
+            opr1 = cond_expr_parse(ctx, ++tok, end, 0);
+            tok = *end;
+            if (opr1 == NULL)
+                cpp_error(ctx, tok, "missing expression after '?'");
+            else if (tok->kind != ':')
+                cpp_error(ctx, tok, "expected ':' in #if/#elif expression "
+                                    "to complete '?:' expression");
+            opr2 = cond_expr_parse(ctx, ++tok, end, 0);
+            tok = *end;
+            if (opr2 == NULL)
+                cpp_error(ctx, tok, "missing expression after ':'");
+            ce = cond_expr_new(ctx, *tok);
+            ce->kind = CEXPR_TERNARY;
+            ce->v.ternary.cnd = cnd;
+            ce->v.ternary.vit = opr1;
+            ce->v.ternary.vif = opr2;
+        } else {
+            op = *tok;
+            if (ce == NULL) {
+                len = cpp_token_splice(tok, buf, sizeof(buf));
+                cpp_error(ctx, tok, "missing value before operator '%.*s'",
+                                    len, buf);
+            }
+            opr1 = ce;
+            opr2 = cond_expr_parse(ctx, ++tok, end, prio);
+            if (opr2 == NULL) {
+                len = cpp_token_splice(tok, buf, sizeof(buf));
+                cpp_error(ctx, tok, "missing value after operator '%.*s'",
+                                    len, buf);
+            }
+            tok = *end;
+            ce = cond_expr_new(ctx, op);
+            ce->kind = CEXPR_BINARY;
+            ce->v.binary.op = op;
+            ce->v.binary.lhs = opr1;
+            ce->v.binary.rhs = opr2;
+        }
+    }
+
+done:
+    *end = tok;
+    return ce;
+}
+
+static uchar cond_expr_eval(cpp_context *ctx, cpp_token *tk)
+{
+    cond_expr *ce;
+    cond_expr_value v;
+    cpp_token *end, *tok;
+
+    tok = expand_line(ctx, tk, /* is_expr = */ 1);
+    ce = cond_expr_parse(ctx, tok, &end, 0);
+    if (ce == NULL)
+        cpp_error(ctx, tok, "missing expression in #if/#elif");
+    else if (end->kind != TK_eof)
+        cpp_error(ctx, end, "stray token after #if/#elif");
+
+    v = cond_expr_eval2(ctx, ce);
+    cond_expr_reset();
+    return v.is_unsigned ? !!v.v.u : !!v.v.s;
+}
+
+static void do_if(cpp_context *ctx, cpp_token *tk)
+{
+    uchar included;
+    cpp_token iftk = *tk;
+
+    cpp_next(ctx, tk);
+
+    included = cond_expr_eval(ctx, tk);
+    cond_stack_push(ctx, iftk);
+    ctx->stream->cond->ctx = COND_IF;
+
+    if (!included) {
+        ctx->stream->cond->flags |= CPP_COND_SKIP;
+        cpp_next(ctx, tk);
+        cond_stack_skip(ctx, tk);
+    }
+}
+
 static void do_ifdef(cpp_context *ctx, cpp_token *tk)
 {
     uchar included;
@@ -750,7 +1264,7 @@ static void do_ifdef(cpp_context *ctx, cpp_token *tk)
 
     name = cpp_token_intern_id(tk);
     included = hash_table_lookup(&ctx->macro, name) != NULL;
-    cond_stack_push(ctx, tk);
+    cond_stack_push(ctx, *tk);
 
     cpp_next(ctx, tk);
     if (tk->kind != '\n')
@@ -780,7 +1294,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
 
     name = cpp_token_intern_id(tk);
     included = hash_table_lookup(&ctx->macro, name) == NULL;
-    cond_stack_push(ctx, tk);
+    cond_stack_push(ctx, *tk);
 
     cpp_next(ctx, tk);
     if (tk->kind != '\n')
@@ -829,6 +1343,37 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
     }
 }
 
+static void do_elif(cpp_context *ctx, cpp_token *tk)
+{
+    uchar included;
+    cpp_token iftk = *tk;
+
+    if (ctx->stream->cond == NULL)
+        cpp_error(ctx, tk, "#elif without previous #if");
+    else if (ctx->stream->cond->ctx == COND_ELSE)
+        cpp_error(ctx, tk, "#elif after #else");
+
+    /* put here for header guard detection */
+    ctx->stream->cond->flags |= CPP_COND_ELSIF;
+
+    if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        cond_stack_skip(ctx, tk);
+        return;
+    }
+
+    cpp_next(ctx, tk);
+
+    included = cond_expr_eval(ctx, tk);
+
+    if (!included) {
+        cpp_next(ctx, tk);
+        cond_stack_skip(ctx, tk);
+    } else {
+        ctx->stream->cond->ctx = COND_ELIF;
+        ctx->stream->cond->flags &= ~CPP_COND_SKIP;
+    }
+}
+
 static void do_else(cpp_context *ctx, cpp_token *tk)
 {
     if (ctx->stream->cond == NULL)
@@ -836,7 +1381,7 @@ static void do_else(cpp_context *ctx, cpp_token *tk)
     else if (ctx->stream->cond->ctx == COND_ELSE)
         cpp_error(ctx, tk, "#else after #else");
 
-    /* Put here for header guard detection */
+    /* put here for header guard detection */
     ctx->stream->cond->flags |= CPP_COND_ELSIF;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
@@ -904,6 +1449,7 @@ static void builtin_macro_setup(cpp_context *ctx)
     ADD_BUILTIN(g__TIMESTAMP__);
     ADD_BUILTIN(g__DATE__);
     ADD_BUILTIN(g__TIME__);
+    ADD_BUILTIN(g_defined);
 }
 
 static void macro_stack_push(cpp_context *ctx, string_ref name)
@@ -1201,15 +1747,17 @@ static const char *month[] = {
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 };
 
+/* Woah, what the fuck is this */
 static void expand_builtin(cpp_context *ctx, string_ref name,
-                           cpp_token *macro_tk)
+                           cpp_token *macro_tk, uchar is_expr)
 {
     time_t now;
     int len = 0;
-    uchar dt = 0;
     struct tm *tm;
     char buf[4096];
     struct stat sb;
+    string_ref defined_op;
+    uchar dt = 0, paren = 0, defined_res;
 
     if (name == g__FILE__) {
         len = snprintf(buf, sizeof(buf), "\"%s\"", ctx->stream->ppfname);
@@ -1265,6 +1813,28 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         dt = 1;
         macro_tk->p = ctx->pptime;
         macro_tk->kind = TK_string;
+    } else if (name == g_defined) {
+        if (!is_expr)
+            return;
+        cpp_next(ctx, macro_tk);
+        if (macro_tk->kind == '(') {
+            paren = 1;
+            cpp_next(ctx, macro_tk);
+        }
+        if (macro_tk->kind != TK_identifier)
+            cpp_error(ctx, macro_tk, "operator 'defined' requires an "
+                                     "identifier");
+        defined_op = cpp_token_intern_id(macro_tk);
+        defined_res = (defined_op != g_defined) &&
+                      (hash_table_lookup(&ctx->macro, defined_op) != NULL);
+        if (paren) {
+            cpp_next(ctx, macro_tk);
+            if (macro_tk->kind != ')')
+                cpp_error(ctx, macro_tk, "missing ')' after 'defined'");
+        }
+        len = 1;
+        buf[0] = defined_res + '0';
+        macro_tk->kind = TK_number;
     } else {
         cpp_error(ctx, macro_tk, "unhandled builtin macro '%s'",
                                   string_ref_ptr(name));
@@ -1276,7 +1846,7 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
     macro_tk->flags &= ~CPP_TOKEN_ESCNL;
 }
 
-static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk)
+static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 {
     uchar kind;
     cpp_token_array_clear(&ctx->line);
@@ -1284,7 +1854,7 @@ static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk)
     while (1) {
         if (tk->kind == '\n' || tk->kind == TK_eof)
             break;
-        else if (tk->kind == TK_identifier && expand(ctx, tk))
+        else if (tk->kind == TK_identifier && expand(ctx, tk, is_expr))
             ;
         else
             cpp_token_array_append(&ctx->line, tk);
@@ -1408,7 +1978,7 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
         cpp_next(ctx, &tk);
         if (tk.kind == TK_eof) {
             break;
-        } else if (tk.kind == TK_identifier && expand(ctx, &tk)) {
+        } else if (tk.kind == TK_identifier && expand(ctx, &tk, 0)) {
             ;
         } else {
             tk.flags &= ~CPP_TOKEN_BOL;
@@ -1514,7 +2084,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
     cpp_token_array_append(os, is); /* TK_eom */
 }
 
-static uchar expand(cpp_context *ctx, cpp_token *tk)
+static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 {
     uint i;
     string_ref name = cpp_token_intern_id(tk);
@@ -1523,7 +2093,7 @@ static uchar expand(cpp_context *ctx, cpp_token *tk)
         return 0;
 
     if (HAS_FLAG(m->flags, CPP_MACRO_BUILTIN)) {
-        expand_builtin(ctx, name, tk);
+        expand_builtin(ctx, name, tk, is_expr);
         return 0; /* Special; No rescanning needed */
     }
 
@@ -1736,11 +2306,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             }
             file = ctx->stream->file;
             pathref = file->path;
-            if (hash_table_lookup(&ctx->guarded_file, pathref)) {
-                /* We know that the file is guarded by header guarded, so we
-                 * can close it immediately. */
-                cpp_file_close(file);
-            } else {
+            if (!hash_table_lookup(&ctx->guarded_file, pathref)) {
                 /* Cache the file, no more cpp_file_open2() if the file is
                  * #included multiple times. */
                 hash_table_insert(&ctx->cached_file, pathref, file);
@@ -1753,7 +2319,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             continue;
         }
 
-        if (tk->kind == TK_identifier && expand(ctx, tk))
+        if (tk->kind == TK_identifier && expand(ctx, tk, 0))
             continue;
         else if (!is_hash(ctx, tk))
             return;
@@ -1772,8 +2338,10 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             do_include(ctx, tk);
             break;
         case CPP_DIR_IF:
+            do_if(ctx, tk);
+            break;
         case CPP_DIR_ELIF:
-            skip_line(ctx, tk);
+            do_elif(ctx, tk);
             break;
         case CPP_DIR_ELSE:
             do_else(ctx, tk);

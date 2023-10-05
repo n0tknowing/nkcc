@@ -52,7 +52,6 @@ typedef unsigned int tkchar;
 
 /* flags for cpp_file */
 #define CPP_FILE_NONL        1 /* no newline at end of file */
-#define CPP_FILE_FREED       2 /* file has been freed */
 /* limits for cpp_file */
 #define CPP_FILE_MAX_USED    1024 /* it's still too big */
 #define CPP_FILE_MAX_SIZE    (1U << 31) /* 2GiB */
@@ -82,8 +81,13 @@ typedef unsigned int tkchar;
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
 /* limits for cpp_buffer */
-#define CPP_BUFFER_CAPA     (1U << 24) /* 16MiB */
+#define CPP_BUFFER_MAX     (1U << 24) /* 16MiB */
 
+/* limits for include search path */
+#define CPP_SEARCHPATH_MAX  128
+
+/* limits for cond_expr */
+#define CPP_CONDEXPR_MAX    1024
 
 /* ---- enums -------------------------------------------------------------- */
 
@@ -232,6 +236,35 @@ typedef struct cond_stack {
     struct cond_stack *prev; /* nested */
 } cond_stack;
 
+typedef struct {
+    uchar is_unsigned;
+    union {
+        long s;
+        ulong u;
+    } v;
+} cond_expr_value;
+
+typedef struct cond_expr {
+    enum { CEXPR_UNARY, CEXPR_BINARY, CEXPR_TERNARY, CEXPR_VALUE } kind;
+    union {
+        struct {
+            cpp_token op;
+            struct cond_expr *opr;
+        } unary;
+        struct {
+            cpp_token op;
+            struct cond_expr *lhs;
+            struct cond_expr *rhs;
+        } binary;
+        struct {
+            struct cond_expr *cnd;
+            struct cond_expr *vit;
+            struct cond_expr *vif;
+        } ternary;
+        cond_expr_value val;
+    } v;
+} cond_expr;
+
 typedef struct macro_stack {
     string_ref name;
     cpp_token_array tok; /* used during substitution */
@@ -316,7 +349,6 @@ void cpp_file_setup(void);
 void cpp_file_cleanup(void);
 cpp_file *cpp_file_open(const char *path, const char *name);
 cpp_file *cpp_file_open2(string_ref path, string_ref name, struct stat *sb);
-void cpp_file_close(cpp_file *file);
 cpp_file *cpp_file_no(ushort no);
 
 /* lex.c */
