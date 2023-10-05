@@ -6,8 +6,7 @@
 typedef struct {
     string_ref key;
     void *val; // hash table don't own the value
-    uint64_t hash : 48; // enough for use in compiler
-    uint16_t psl;
+    uint64_t hash;
 } ht_entry_t;
 
 typedef struct {

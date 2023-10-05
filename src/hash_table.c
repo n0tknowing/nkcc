@@ -1,10 +1,10 @@
-// this file implement:
-//   https://cs.uwaterloo.ca/research/tr/1986/CS-86-14.pdf
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "hash_table.h"
+
+#define TOMBSTONE ((void *)-1)
 
 static unsigned int pow2_roundup(unsigned int x)
 {
@@ -44,12 +44,11 @@ void hash_table_cleanup_with_free(ht_t *ht, void (*free_func)(void *))
     ht_entry_t *entries = ht->entries;
 
     for (i = 0; i < ht->capacity; i++) {
-        if (entries[i].key != 0) {
+        if (entries[i].key != 0 && entries[i].val != TOMBSTONE) {
             free_func(entries[i].val);
             entries[i].key = 0;
             entries[i].val = NULL;
             entries[i].hash = 0;
-            entries[i].psl = 0;
         }
     }
 
@@ -80,23 +79,13 @@ static void __try_resize(ht_t *ht)
     mask = capacity - 1;
 
     for (i = 0; i < old_capacity; i++) {
-        ht_entry_t *old_ent = &old_entries[i], *ent;
-        if (old_ent->key == 0)
+        ht_entry_t *old_ent = &old_entries[i];
+        if (old_ent->key == 0 || old_ent->val == TOMBSTONE)
             continue;
-        old_ent->psl = 0; // reset for insertion to new array
         idx = old_ent->hash & mask;
-        ent = &entries[idx];
-        while (ent->key != 0) {
-            if (ent->psl > old_ent->psl) {
-                ht_entry_t tmp = *ent;
-                *ent = *old_ent;
-                *old_ent = tmp;
-            }
+        while (entries[idx].key != 0)
             idx = (idx + 1) & mask;
-            ent = &entries[idx];
-            old_ent->psl++;
-        }
-        *ent = *old_ent;
+        entries[idx] = *old_ent;
     }
 
     free(old_entries);
@@ -108,20 +97,17 @@ static void __try_resize(ht_t *ht)
 static ht_entry_t *__do_lookup(ht_t *ht, string_ref key, uint64_t hash,
                                unsigned int *i)
 {
-    uint16_t psl;
     unsigned int idx, mask;
 
-    psl = 0;
     mask = ht->capacity - 1;
     idx = hash & mask;
 
-    while (ht->entries[idx].key != 0 && psl <= ht->entries[idx].psl) {
+    while (ht->entries[idx].key != 0 && ht->entries[idx].val != TOMBSTONE) {
         if (ht->entries[idx].key == key && ht->entries[idx].hash == hash) {
             if (i) *i = idx;
             return &ht->entries[idx];
         }
         idx = (idx + 1) & mask;
-        psl++;
     }
 
     return NULL;
@@ -147,50 +133,31 @@ void *hash_table_insert(ht_t *ht, string_ref key, void *val)
     ent.key = key;
     ent.val = val;
     ent.hash = hash;
-    ent.psl = 0;
 
     mask = ht->capacity - 1;
     idx = hash & mask;
     ent_at = &ht->entries[idx];
 
-    while (ent_at->key != 0) {
-        if (ent.psl > ent_at->psl) {
-            ht_entry_t tmp = *ent_at;
-            *ent_at = ent;
-            ent = tmp;
-        }
+    while (ent_at->key != 0 && ent_at->val != TOMBSTONE) {
         idx = (idx + 1) & mask;
         ent_at = &ht->entries[idx];
-        ent.psl++;
     }
 
     *ent_at = ent;
     ht->count++;
-
     return NULL;
 }
 
 void *hash_table_remove(ht_t *ht, string_ref key)
 {
     void *ret_val = NULL;
+    unsigned int mask = ht->capacity - 1;
     uint64_t hash = string_ref_hash(key) & 0xfffffffffffful;
-    unsigned int idx, mask = ht->capacity - 1;
-    ht_entry_t *ent = __do_lookup(ht, key, hash, &idx), *prev;
+    ht_entry_t *ent = __do_lookup(ht, key, hash, NULL), *prev;
 
     if (ent != NULL) {
         ret_val = ent->val;
-        memset(ent, 0, sizeof(*ent)); // remove the entry
-        do {
-            prev = ent;
-            idx = (idx + 1) & mask; // fetch next
-            ent = &ht->entries[idx]; // ...
-            if (ent->psl > prev->psl) {
-                // now do backward shift
-                *prev = *ent;
-                prev->psl--;
-            }
-        } while (ent->psl != 0);
-        memset(prev, 0, sizeof(*prev)); // remove duplicated entry after shift
+        ent->val = TOMBSTONE;
         ht->count--;
     }
 
