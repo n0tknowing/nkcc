@@ -323,11 +323,12 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
                 break;
             s->p++;
         } else if (tolower(*s->p) == 'e' || tolower(*s->p) == 'p') {
-            tk->flags |= CPP_TOKEN_FLNUM;
             s->p++;
             CHECK_ESCNL(s, tk);
-            if (*s->p == '+' || *s->p == '-')
+            if (*s->p == '+' || *s->p == '-') {
+                tk->flags |= CPP_TOKEN_FLNUM;
                 s->p++;
+            }
         } else if (!isalnum(*s->p)) {
             break;
         } else {
