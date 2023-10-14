@@ -1,14 +1,4 @@
-// Lexer implementation
-/*
- * this comment is intentionally placed here to\
- * stress the lexer and the preprocessor
- * */
-/**/#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include "cpp.h"
-
-static cpp_context *g_context;
 
 /* handle complicated "\\\n" */
 #define CHECK_ESCNL(_s, _t) do {                                \
@@ -21,65 +11,19 @@ static cpp_context *g_context;
 
 /* ------------------------------------------------------------------------- */
 
+static cpp_context *g_context;
+static cpp_buffer g_lexbuf;
+
 void cpp_lex_setup(cpp_context *ctx)
 {
     g_context = ctx;
+    cpp_buffer_setup(&g_lexbuf, 16384);
 }
 
-void cpp_lex_cleanup(void)
+void cpp_lex_cleanup(cpp_context *ctx)
 {
-}
-
-/* ---- locale-free ctype.h ------------------------------------------------ */
-
-static int isodigit(int ch)
-{
-    return (uint)ch - '0' < 8;
-}
-
-static int isdigit(int ch)
-{
-    return (uint)ch - '0' < 10;
-}
-
-static int isxdigit(int ch)
-{
-    return isdigit(ch) || ((uint)ch | 32) - 'a' < 6;
-}
-
-static int isupper(int ch)
-{
-    return (uint)ch - 'A' < 26;
-}
-
-static int islower(int ch)
-{
-    return (uint)ch - 'a' < 26;
-}
-
-static int isalpha(int ch)
-{
-    return islower(ch) || isupper(ch);
-}
-
-static int isalnum(int ch)
-{
-    return isalpha(ch) || isdigit(ch);
-}
-
-static int isspace(int ch)
-{
-    return ch == ' ' || (uint)ch - '\t' < 5;
-}
-
-static int ispunct(int ch)
-{
-    return ((uint)ch - 33 < 94) && !isalnum(ch);
-}
-
-static int tolower(int ch)
-{
-    return isupper(ch) ? ch | 32 : ch;
+    (void)ctx;
+    cpp_buffer_cleanup(&g_lexbuf);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -141,7 +85,7 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
 void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
 {
     tk->lineno = s->lineno;
-    tk->p = s->p;
+    tk->p.ptr = s->p;
 
     if (endq == '"' || endq == '\'')
         s->p++;
@@ -179,15 +123,15 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
         cpp_lex_error(s, "missing terminating %c character", endq);
     } else {
         s->p++;
-        tk->length = (uint)(s->p - tk->p);
+        tk->length = (uint)(s->p - tk->p.ptr);
     }
 }
 
 static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 {
     tk->lineno = s->lineno;
+    tk->p.ptr = s->p;
     tk->kind = *s->p;
-    tk->p = s->p;
     s->p++;
 
     /* one character, no need to handle line continuation */
@@ -198,7 +142,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 
     CHECK_ESCNL(s, tk);
 
-    switch (*tk->p) {
+    switch (*(tk->p.ptr)) {
     case '+':
         if (*s->p == '+') tk->kind = TK_incr;
         else if (*s->p == '=') tk->kind = TK_asg_add;
@@ -247,7 +191,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             } else {
                 tk->kind = TK_lshift;
             }
-            tk->length = (uint)(s->p - tk->p);
+            tk->length = (uint)(s->p - tk->p.ptr);
             return;
         } else if (*s->p == '=') {
             tk->kind = TK_le;
@@ -263,7 +207,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             } else {
                 tk->kind = TK_rshift;
             }
-            tk->length = (uint)(s->p - tk->p);
+            tk->length = (uint)(s->p - tk->p.ptr);
             return;
         } else if (*s->p == '=') {
             tk->kind = TK_ge;
@@ -276,7 +220,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             if (*s->p == '.') {
                 s->p++;
                 tk->kind = TK_elipsis;
-                tk->length = (uint)(s->p - tk->p);
+                tk->length = (uint)(s->p - tk->p.ptr);
             }
         }
         break;
@@ -284,33 +228,37 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 
     if (tk->kind >= TK_elipsis) {
         if (tk->kind != TK_elipsis) s->p++;
-        tk->length = (uint)(s->p - tk->p);
+        tk->length = (uint)(s->p - tk->p.ptr);
     } else {
         /* restore line */
-        s->p = tk->p; s->lineno = tk->lineno; s->p++;
-        tk->length = 1; tk->kind = *tk->p;
+        s->p = tk->p.ptr; s->lineno = tk->lineno; s->p++;
+        tk->length = 1; tk->kind = *(tk->p.ptr);
     }
 }
 
 static void cpp_lex_ident(cpp_stream *s, cpp_token *tk)
 {
-    tk->p = s->p;
+    const uchar *p = cpp_buffer_append_ch(&g_lexbuf, *s->p);
+
     tk->lineno = s->lineno;
     s->p++;
 
-    while (*s->p) {
+    while (*s->p != 0) {
         CHECK_ESCNL(s, tk);
         if (!(isalnum(*s->p) || *s->p == '_'))
             break;
+        cpp_buffer_append_ch(&g_lexbuf, *s->p);
         s->p++;
     }
 
-    tk->length = (uint)(s->p - tk->p);
+    tk->p.ref = string_ref_newlen((const char *)p, g_lexbuf.len);
+    tk->length = string_ref_len(tk->p.ref);
+    cpp_buffer_clear(&g_lexbuf);
 }
 
 static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
 {
-    tk->p = s->p;
+    tk->p.ptr = s->p;
     tk->lineno = s->lineno;
 
     while (*s->p) {
@@ -336,11 +284,13 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
         }
     }
 
-    tk->length = (uint)(s->p - tk->p);
+    tk->length = (uint)(s->p - tk->p.ptr);
 }
 
 void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 {
+    const uchar *p;
+
     if (unlikely(s == NULL))
         return;
 
@@ -411,16 +361,16 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
         /* number or punctuator */
         if (*s->p == '.') {
-            tk->p = s->p++;
+            p = s->p++;
             CHECK_ESCNL(s, tk);
             if (isdigit(*s->p)) {
-                s->p = tk->p;
+                s->p = p;
                 cpp_lex_number(s, tk);
                 tk->kind = TK_number;
                 return;
             }
             /* else fallthrough to scan punctuator */
-            s->p = tk->p;
+            s->p = p;
         }
 
         /* punctuator */
@@ -431,5 +381,5 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
     tk->lineno = s->lineno;
     tk->kind = TK_eof;
     tk->length = 0;
-    tk->p = s->p;
+    tk->p.ptr = s->p;
 }

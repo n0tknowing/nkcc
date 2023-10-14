@@ -6,7 +6,7 @@ static int g_file_count = 1; /* 0 is reserved */
 void cpp_file_setup(void)
 {
     cpp_file *f = &g_files[0];
-    f->name = LITREF("<command-line>");
+    f->name = LITREF("<temp-buffer>");
     f->path = f->name;
     f->dirpath = LITREF(".");
 }

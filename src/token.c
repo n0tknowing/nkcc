@@ -7,15 +7,17 @@ const char *cpp_token_kind(uchar kind)
 {
     if (kind < 128 || (kind >= TK_elipsis && kind <= TK_asg_bxor) ||
         kind == TK_paste)
-        return "OPR";
+        return "Punctuator";
     else if (kind == TK_identifier)
-        return "IDN";
+        return "Identifier";
     else if (kind == TK_number)
-        return "NUM";
+        return "Number";
     else if (kind == TK_string)
-        return "STR";
+        return "String literal";
     else if (kind == TK_char_const)
-        return "CHR";
+        return "Character constant";
+    else if (kind == TK_eof)
+        return "End of file";
     else
         return "???";
 }
@@ -23,7 +25,9 @@ const char *cpp_token_kind(uchar kind)
 uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
 {
     uint i = 0, j = 0;
-    const uchar *p = tk->p;
+    const uchar *p = (tk->kind == TK_identifier) ?
+                        (const uchar *)string_ref_ptr(tk->p.ref) :
+                        tk->p.ptr;
     uint len = MIN(tk->length, bufsz);
 
     if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
@@ -40,42 +44,67 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
     return i ? j : len;
 }
 
-string_ref cpp_token_intern_id(const cpp_token *tk)
+uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
 {
-    string_ref id;
-    uchar buf[1024];
-    uint len = tk->length;
+    uint len1, len2;
+    uchar spc1, spc2;
+    uchar buf1[1024], buf2[1024];
 
-    if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
-        len = cpp_token_splice(tk, buf, sizeof(buf));
-        id = string_ref_newlen((const char *)buf, len);
-    } else {
-        id = string_ref_newlen((const char *)tk->p, len);
+    if (tk1->kind != tk2->kind)
+        return 0;
+
+    spc1 = HAS_FLAG(tk1->flags, CPP_TOKEN_SPACE);
+    spc2 = HAS_FLAG(tk2->flags, CPP_TOKEN_SPACE);
+
+    if (spc1 != spc2)
+        return 0;
+
+    switch (tk1->kind) {
+    case TK_identifier:
+        if (tk1->p.ref != tk2->p.ref)
+            return 0;
+        break;
+    case TK_string:
+    case TK_char_const:
+    case TK_number:
+        len1 = cpp_token_splice(tk1, buf1, sizeof(buf1));
+        len2 = cpp_token_splice(tk2, buf2, sizeof(buf2));
+        if (len1 != len2 || memcmp(buf1, buf2, len1) != 0)
+            return 0;
+        break;
+    default:
+        break;
     }
 
-    return id;
+    return 1;
 }
 
 void cpp_token_print(FILE *fp, const cpp_token *tk)
 {
-    uint i = 0;
-    uchar buf[1024] = {0};
+    uint len;
+    const uchar *p;
+    uchar buf[1024];
 
     if (PREV_SPACE(tk))
-        buf[i++] = ' ';
-    fwrite(buf, 1, i, fp);
+        fwrite((const void *)" ", 1, 1, fp);
 
     if (tk->kind < 128) {
-        fwrite(tk->p, 1, 1, fp);
+        fwrite(tk->p.ptr, 1, 1, fp);
         return;
     }
 
-    if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL))) {
-        uint len = cpp_token_splice(tk, buf, sizeof(buf));
-        fwrite(buf, 1, len, fp);
+    if (tk->kind == TK_identifier) {
+        p = (const uchar *)string_ref_ptr(tk->p.ref);
+        len = string_ref_len(tk->p.ref);
+    } else if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL))) {
+        len = cpp_token_splice(tk, buf, sizeof(buf));
+        p = buf;
     } else {
-        fwrite(tk->p, 1, tk->length, fp);
+        p = tk->p.ptr;
+        len = tk->length;
     }
+
+    fwrite(p, 1, len, fp);
 }
 
 void cpp_token_array_setup(cpp_token_array *ts, uint max)

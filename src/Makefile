@@ -1,7 +1,7 @@
 CC=gcc
 #CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv -g -I/home/nkw/stuff/compiler-ref/pchibicc/include
-CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv -Wno-unused -O2
-SRCS=file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
+CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv -O2
+SRCS=buffer.c file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
 OBJS=$(SRCS:.c=.o)
 
 ifdef DEBUG

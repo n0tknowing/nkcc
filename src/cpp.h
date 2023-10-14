@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include "ctype.h"
 #include "string_pool.h"
 #include "hash_table.h"
 
@@ -80,7 +81,7 @@ typedef unsigned int tkchar;
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
-/* limits for cpp_buffer */
+/* limits for cpp_context::buf */
 #define CPP_BUFFER_MAX     (1U << 24) /* 16MiB */
 
 /* limits for include search path */
@@ -99,28 +100,28 @@ enum _cpp_token_kind {
     TK_string,
     TK_identifier,
 
-    TK_elipsis, // ...
-    TK_lshift, // <<
-    TK_rshift, // >>
-    TK_incr, // ++
-    TK_decr, // --
-    TK_arrow, // ->
-    TK_and, // &&
-    TK_or, // ||
-    TK_eq, // ==
-    TK_ne, // !=
-    TK_le, // <=
-    TK_ge, // >=
-    TK_asg_add, // +=
-    TK_asg_sub, // -=
-    TK_asg_mul, // *=
-    TK_asg_div, // /=
-    TK_asg_mod, // %=
-    TK_asg_lshift, // <<=
-    TK_asg_rshift, // >>=
-    TK_asg_band, // &=
-    TK_asg_bxor, // ^=
-    TK_asg_bor, // |=
+    TK_elipsis, /* ... */
+    TK_lshift, /* << */
+    TK_rshift, /* >> */
+    TK_incr, /* ++ */
+    TK_decr, /* -- */
+    TK_arrow, /* -> */
+    TK_and, /* && */
+    TK_or, /* || */
+    TK_eq, /* == */
+    TK_ne, /* != */
+    TK_le, /* <= */
+    TK_ge, /* >= */
+    TK_asg_add, /* += */
+    TK_asg_sub, /* -= */
+    TK_asg_mul, /* *= */
+    TK_asg_div, /* /= */
+    TK_asg_mod, /* %= */
+    TK_asg_lshift, /* <<= */
+    TK_asg_rshift, /* >>= */
+    TK_asg_band, /* &= */
+    TK_asg_bxor, /* ^= */
+    TK_asg_bor, /* |= */
 
     TK_continue,
     TK_register,
@@ -163,22 +164,6 @@ enum _cpp_token_kind {
     TK_eof = 255
 };
 
-typedef enum {
-    CPP_DIR_IF = 0,
-    CPP_DIR_IFDEF,
-    CPP_DIR_IFNDEF,
-    CPP_DIR_ELIF,
-    CPP_DIR_ELSE,
-    CPP_DIR_ENDIF,
-    CPP_DIR_INCLUDE,
-    CPP_DIR_DEFINE,
-    CPP_DIR_UNDEF,
-    CPP_DIR_LINE,
-    CPP_DIR_PRAGMA,
-    CPP_DIR_ERROR,
-    CPP_DIR_UNKNOWN = 32
-} cpp_directive_kind;
-
 
 /* ---- structs and unions ------------------------------------------------- */
 
@@ -199,7 +184,10 @@ typedef struct {
     ushort fileno;
     uint lineno;
     uint length;
-    const uchar *p;
+    union {
+        string_ref ref; /* for TK_identifier */
+        const uchar *ptr; /* for the rest */
+    } p;
 } cpp_token;
 
 typedef struct {
@@ -272,9 +260,15 @@ typedef struct macro_stack {
     struct macro_stack *prev; /* nested */
 } macro_stack;
 
+typedef struct {
+    macro_stack *head;
+    macro_stack *tail;
+} macro_stack_cache;
+
 typedef struct cpp_buffer {
     uchar *data;
     uint len;
+    uint cap;
 } cpp_buffer;
 
 typedef struct cpp_stream {
@@ -296,6 +290,11 @@ typedef struct arg_stream {
     struct arg_stream *prev;
 } arg_stream;
 
+typedef struct {
+    arg_stream *head;
+    arg_stream *tail;
+} arg_stream_cache;
+
 /*
  * `ts` is the token array after preprocessing a file, used by later phases.
  * `temp` is token array for backtrack.
@@ -309,7 +308,7 @@ typedef struct arg_stream {
  * `cached_file` is used to store cpp_file that's not guarded either by header
  *               guard or #pragma once, so we can avoid reading the same file.
  *               a guarded file will never be cached.
- * `buf` is dynamic buffer, used to store temporary token pointer.
+ * `buf` is a fixed-size big buffer, used to store temporary token pointer.
  * `ppdate` is the cached value of __DATE__ macro.
  * `pptime` is the cached value of __TIME__ macro.
  */
@@ -333,16 +332,24 @@ typedef struct {
 
 /* ---- function declarations ---------------------------------------------- */
 
+/* buffer.c */
+void cpp_buffer_setup(cpp_buffer *buf, uint cap);
+void cpp_buffer_cleanup(cpp_buffer *buf);
+void cpp_buffer_clear(cpp_buffer *buf);
+const uchar *cpp_buffer_append(cpp_buffer *buf, const uchar *p, uint psize);
+const uchar *cpp_buffer_append_ch(cpp_buffer *buf, uchar ch);
+
 /* cpp.c */
 void cpp_context_setup(cpp_context *ctx);
 void cpp_context_cleanup(cpp_context *ctx);
 void cpp_run(cpp_context *ctx, cpp_file *file);
 void cpp_print(cpp_context *ctx, cpp_file *file, FILE *fp);
+void cpp_dump_token(cpp_context *ctx, FILE *fp);
+void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...);
+void cpp_warn(cpp_context *ctx, cpp_token *tk, const char *s, ...);
 void cpp_macro_define(cpp_context *ctx, const char *in);
 void cpp_macro_undefine(cpp_context *ctx, const char *in);
 void cpp_search_path_append(cpp_context *ctx, const char *dirpath);
-const uchar *cpp_buffer_append(cpp_context *ctx, const uchar *p, uint psize);
-const uchar *cpp_buffer_append_ch(cpp_context *ctx, uchar ch);
 
 /* file.c */
 void cpp_file_setup(void);
@@ -353,7 +360,7 @@ cpp_file *cpp_file_no(ushort no);
 
 /* lex.c */
 void cpp_lex_setup(cpp_context *ctx);
-void cpp_lex_cleanup(void);
+void cpp_lex_cleanup(cpp_context *ctx);
 void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar q);
 void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 
@@ -362,7 +369,7 @@ const char *cpp_token_kind(uchar kind);
 uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, const cpp_token *tk);
 void cpp_token_unpp(const cpp_token *tk);
-string_ref cpp_token_intern_id(const cpp_token *tk);
+uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
 void cpp_token_array_setup(cpp_token_array *ts, uint max);
 void cpp_token_array_clear(cpp_token_array *ts);
 void cpp_token_array_append(cpp_token_array *ts, const cpp_token *tk);

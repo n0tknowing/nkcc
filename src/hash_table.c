@@ -109,7 +109,6 @@ static ht_entry_t *__do_lookup(ht_t *ht, string_ref key, uint64_t hash,
         }
         idx = (idx + 1) & mask;
     }
-
     return NULL;
 }
 
@@ -119,7 +118,7 @@ void *hash_table_insert(ht_t *ht, string_ref key, void *val)
     unsigned int idx, mask;
     ht_entry_t *ent_at, ent;
 
-    hash = string_ref_hash(key) & 0xfffffffffffful;
+    hash = string_ref_hash(key);
     ent_at = __do_lookup(ht, key, hash, NULL);
 
     if (ent_at != NULL) {
@@ -151,23 +150,20 @@ void *hash_table_insert(ht_t *ht, string_ref key, void *val)
 void *hash_table_remove(ht_t *ht, string_ref key)
 {
     void *ret_val = NULL;
-    unsigned int mask = ht->capacity - 1;
-    uint64_t hash = string_ref_hash(key) & 0xfffffffffffful;
-    ht_entry_t *ent = __do_lookup(ht, key, hash, NULL), *prev;
+    uint64_t hash = string_ref_hash(key);
+    ht_entry_t *ent = __do_lookup(ht, key, hash, NULL);
 
     if (ent != NULL) {
         ret_val = ent->val;
         ent->val = TOMBSTONE;
         ht->count--;
     }
-
     return ret_val;
 }
 
 void *hash_table_lookup(ht_t *ht, string_ref key)
 {
-    uint64_t hash = string_ref_hash(key) & 0xffffffffffff;
+    uint64_t hash = string_ref_hash(key);
     ht_entry_t *ent = __do_lookup(ht, key, hash, NULL);
-
     return ent ? ent->val : NULL;
 }
