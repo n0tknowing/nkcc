@@ -24,21 +24,27 @@ const char *cpp_token_kind(uchar kind)
 
 uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
 {
-    uint i = 0, j = 0;
-    const uchar *p = (tk->kind == TK_identifier) ?
-                        (const uchar *)string_ref_ptr(tk->p.ref) :
-                        tk->p.ptr;
-    uint len = MIN(tk->length, bufsz);
+    const uchar *p;
+    uint i = 0, j = 0, len;
 
-    if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
-        while (i < len) {
-            if (i + 2 <= len && p[i] == '\\' && p[i+1] == '\n')
-                i += 2;
-            else
-                buf[j++] = p[i++];
-        }
+    if (tk->kind == TK_identifier) {
+        len = MIN(tk->length, bufsz);
+        memcpy(buf, (const uchar *)string_ref_ptr(tk->p.ref), len);
     } else {
-        memcpy(buf, p, len);
+        p = tk->p.ptr;
+        if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
+            uint len2 = tk->length;
+            while (i < len2 && j < bufsz) {
+                if (i + 2 <= len2 && p[i] == '\\' && p[i+1] == '\n')
+                    i += 2;
+                else
+                    buf[j++] = p[i++];
+            }
+            len = j;
+        } else {
+            len = MIN(tk->length, bufsz);
+            memcpy(buf, p, len);
+        }
     }
 
     return i ? j : len;
