@@ -1841,7 +1841,6 @@ static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
         tk->kind = ')'; tk->length = 1;
         hash_table_insert(args, g__VA_ARGS__, arg);
     } else if (tk->kind != ')') {
-        cpp_next_nonl(ctx, tk);
         hash_table_cleanup_with_free(args, macro_arg_free);
         cpp_error(ctx, tk, "too many arguments for macro '%s'",
                             string_ref_ptr(m->name));
