@@ -12,10 +12,10 @@
  *  with lookup since in compiler, lookup is the most used operation to find
  *  duplicated identifier.
  *
- *  Note that string pool is only used for identifier, it's not for string
- *  literal, because it can be large. This is true for C, as string literals
- *  can be adjacent and they need to be concatenated after preprocessing stage
- *  and before syntax analysis stage.
+ *  Despite the name, string pool is only used for identifier, it's not for
+ *  string literal, because it can be large. This is true for C, as string
+ *  literals can be adjacent and they need to be concatenated after
+ *  preprocessing stage and before syntax analysis stage.
  *
  *      const char *p = "Hello "
  *                      "world!"

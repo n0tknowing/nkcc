@@ -1929,6 +1929,13 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
             cpp_error(ctx, macro_tk, "operator 'defined' requires an "
                                      "identifier");
         defined_op = macro_tk->p.ref;
+        /* defined_op need to be checked against 'defined' since builtin macros
+         * are inserted into ctx::macro hash table (see builtin_macro_setup()).
+         * if not, this code:
+         *      #if defined(defined)
+         *      OK
+         *      #endif
+         * will print 'OK' and this is incorrect. */
         defined_res = (defined_op != g_defined) &&
                       (hash_table_lookup(&ctx->macro, defined_op) != NULL);
         if (paren) {
@@ -2156,7 +2163,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
                     is += 3;
                 } else {
                     /* The first token from the argument must be either have
-                     * CPP_TOKEN_SPACE if the parameter token has it or not
+                     * CPP_TOKEN_SPACE if the parameter token have it or not
                      * at all. In the later case, the CPP_TOKEN_SPACE must
                      * be removed. */
                     is2->flags &= ~CPP_TOKEN_SPACE;
@@ -2274,12 +2281,10 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         cpp_error(ctx, tk, "no macro name given in #define");
 
     name = tk->p.ref;
-    if (name >= g__VA_ARGS__ && name <= g_defined) {
-        if (name == g_defined)
-            cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
-        else if (name == g__VA_ARGS__)
-            cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
-    }
+    if (name == g_defined)
+        cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
+    else if (name == g__VA_ARGS__)
+        cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
 
     old_m = hash_table_lookup(&ctx->macro, name);
     cpp_next(ctx, tk);

@@ -77,7 +77,6 @@ typedef unsigned int tkchar;
 #define CPP_MACRO_BUILTIN   2 /* this macro is builtin macros */
 #define CPP_MACRO_VA_ARG    4 /* this macro arg is variadic args */
 #define CPP_MACRO_GUARD     8 /* this macro is used as header guard */
-#define CPP_MACRO_EXPR     16 /* this macro is used in #if/#elif expression */
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
@@ -207,8 +206,8 @@ typedef struct {
 
 typedef struct {
     uchar flags;
-    string_ref param;
-    cpp_token_array body;
+    string_ref param; /* associated parameter */
+    cpp_token_array body; /* argument tokens */
 } cpp_macro_arg;
 
 typedef struct cond_stack {
@@ -285,7 +284,7 @@ typedef struct cpp_stream {
 } cpp_stream;
 
 typedef struct arg_stream {
-    const cpp_token *p; /* the tokens in an argument from cpp_macro_arg */
+    const cpp_token *p; /* the tokens in an argument from cpp_macro_arg::body */
     macro_stack *macro;
     struct arg_stream *prev;
 } arg_stream;
@@ -307,7 +306,7 @@ typedef struct {
  * `macro` is where all macros in a translation unit defined.
  * `cached_file` is used to store cpp_file that's not guarded either by header
  *               guard or #pragma once, so we can avoid reading the same file.
- *               a guarded file will never be cached.
+ *               a guarded file is cached separately in `guarded_file`.
  * `buf` is a fixed-size big buffer, used to store temporary token pointer.
  * `ppdate` is the cached value of __DATE__ macro.
  * `pptime` is the cached value of __TIME__ macro.
