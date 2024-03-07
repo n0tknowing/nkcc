@@ -2179,6 +2179,9 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
             continue;
         }
 
+        if (is->kind == TK_identifier && is->p.ref == macro_tk->p.ref)
+            is->flags |= CPP_TOKEN_NOEXPAND;
+
         /* Remaining token from the replacement list. */
         is->lineno = macro_tk->lineno;
         cpp_token_array_append(os, is++);
