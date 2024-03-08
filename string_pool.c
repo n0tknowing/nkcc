@@ -65,23 +65,24 @@
  */
 struct pool_table {
     string_ref *data;
-    unsigned int count;
-    unsigned int capacity;
-    unsigned int load_factor;
+    uint32_t count;
+    uint32_t capacity;
+    uint32_t load_factor;
 };
 
 /* This is what a `string_ref` points to. */
 struct string_off {
-    unsigned int offset; /* Offset in pool_buffer::data */
-    unsigned int length; /* The length (excluding '\0') */
+    uint32_t offset; /* Offset in pool_buffer::data */
+    uint32_t length; /* The length (excluding '\0') */
+    uint64_t hash; /* The hash */
 };
 
 /* We store the information of each string_ref in an array for O(1) access.
  * There's no need to traverse the array. */
 struct pool_array {
     struct string_off *data;
-    unsigned int count;
-    unsigned int capacity;
+    uint32_t count;
+    uint32_t capacity;
 };
 
 /* A giant mmap()-ed dynamic buffer to store the strings, contiguously.
@@ -89,8 +90,8 @@ struct pool_array {
  */
 struct pool_buffer {
     char *data;
-    unsigned int count;
-    unsigned int capacity;
+    uint32_t count;
+    uint32_t capacity;
 };
 
 static struct pool_table g_pool;
@@ -180,7 +181,6 @@ static string_ref __lookup(const char *s0, uint64_t hash, unsigned int len)
 
 static void __try_resize(void)
 {
-    const char *ptr;
     string_ref *new_pool, *old_pool;
     unsigned int new_capacity, old_capacity, i, idx, mask;
 
@@ -199,8 +199,7 @@ static void __try_resize(void)
     for (i = 0; i < old_capacity; i++) {
         string_ref s = old_pool[i];
         if (s != 0) {
-            ptr = g_buffer.data + g_array.data[s].offset;
-            idx = __do_hash(ptr, g_array.data[s].length) & mask;
+            idx = g_array.data[s].hash & mask;
             while (new_pool[idx] != 0)
                 idx = (idx + 1) & mask;
             new_pool[idx] = s;
@@ -248,8 +247,9 @@ uint32_t string_pool_count(void)
 
 string_ref string_ref_newlen(const char *s, unsigned int len)
 {
+    uint64_t hash;
     string_ref str;
-    unsigned int hash, idx, mask;
+    uint32_t idx, mask;
 
     if (unlikely(g_pool.data == NULL))
         string_pool_setup();
@@ -271,6 +271,7 @@ string_ref string_ref_newlen(const char *s, unsigned int len)
         idx = (idx + 1) & mask;
 
     str = __buffer_new(s, len);
+    g_array.data[str].hash = hash;
     g_pool.data[idx] = str;
     g_pool.count++;
 
@@ -329,5 +330,6 @@ size_t string_ref_len(string_ref r0)
 
 uint64_t string_ref_hash(string_ref r0)
 {
-    return __do_hash(string_ref_ptr(r0), string_ref_len(r0));
+    err_if(r0 >= g_array.capacity, "0x%08u is not valid string_ref", r0);
+    return g_array.data[r0].hash;
 }
