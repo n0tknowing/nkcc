@@ -66,9 +66,8 @@ typedef unsigned int tkchar;
 #define CPP_TOKEN_SPACE    32 /* token is followed by whitespace */
 
 /* flags for cond_stack */
-#define CPP_COND_ELSIF      1 /* this branch has #elif/#else */
-#define CPP_COND_SKIP       2 /* we are looking for #elif/#else/#endif */
-#define CPP_COND_GUARD      4 /* #ifdef ... #define was checked */
+#define CPP_COND_SKIP       1 /* we are looking for #elif/#else/#endif */
+#define CPP_COND_GUARD      2 /* #ifdef ... #define was checked */
 /* limits for cond_stack */
 #define CPP_COND_MAX       32 /* nested, per file */
 
