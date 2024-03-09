@@ -1359,8 +1359,9 @@ static void do_elif(cpp_context *ctx, cpp_token *tk)
     else if (ctx->stream->cond->ctx == COND_ELSE)
         cpp_error(ctx, tk, "#elif after #else");
 
-    /* put here for header guard detection */
-    ctx->stream->cond->flags |= CPP_COND_ELSIF;
+    /* Since we found #elif, this cond_stack is no longer valid for header
+     * guard detection */
+    ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
         cond_stack_skip(ctx, tk);
@@ -1389,8 +1390,9 @@ static void do_else(cpp_context *ctx, cpp_token *tk)
     else if (ctx->stream->cond->ctx == COND_ELSE)
         cpp_error(ctx, tk, "#else after #else");
 
-    /* put here for header guard detection */
-    ctx->stream->cond->flags |= CPP_COND_ELSIF;
+    /* Since we found #else, this cond_stack is no longer valid for header
+     * guard detection */
+    ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
         cond_stack_skip(ctx, tk);
@@ -1422,8 +1424,7 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
     if (tk->kind == TK_eof) {
         guard_name = ctx->stream->cond->guard_name;
         if (ctx->stream->cond->prev == NULL
-            && HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD)
-            && !HAS_FLAG(ctx->stream->cond->flags, CPP_COND_ELSIF)) {
+            && HAS_FLAG(ctx->stream->cond->flags, CPP_COND_GUARD)) {
             m = hash_table_lookup(&ctx->macro, guard_name);
             if (m != NULL) {
                 pathref = ctx->stream->file->path;
