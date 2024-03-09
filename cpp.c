@@ -1266,6 +1266,7 @@ static void do_ifdef(cpp_context *ctx, cpp_token *tk)
 {
     uchar included;
     string_ref name;
+    cpp_token ifdeftk = *tk;
 
     cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
@@ -1273,7 +1274,7 @@ static void do_ifdef(cpp_context *ctx, cpp_token *tk)
 
     name = tk->p.ref;
     included = hash_table_lookup(&ctx->macro, name) != NULL;
-    cond_stack_push(ctx, *tk);
+    cond_stack_push(ctx, ifdeftk);
 
     cpp_next(ctx, tk);
     if (tk->kind != '\n')
@@ -1294,6 +1295,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
     uchar included;
     string_ref dkind;
     string_ref name, guard_name;
+    cpp_token ifndeftk = *tk;
 
     cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
@@ -1301,7 +1303,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
 
     name = tk->p.ref;
     included = hash_table_lookup(&ctx->macro, name) == NULL;
-    cond_stack_push(ctx, *tk);
+    cond_stack_push(ctx, ifndeftk);
 
     cpp_next(ctx, tk);
     if (tk->kind != '\n')
