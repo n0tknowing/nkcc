@@ -44,7 +44,7 @@ static void cpp_lex_error(cpp_stream *s, const char *fmt, ...)
 static void cpp_lex_comment(cpp_stream *s, tkchar kind)
 {
     uint start = s->lineno;
-    s->p += 2;
+    s->p++;
 
     if (kind == '/') {
         while (*s->p) {
@@ -307,17 +307,21 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
         /* comment */
         if (*s->p == '/') {
-            /* special line continuation handling */
-            if (s->p[1] == '\\' && s->p[2] == '\n' &&
-               (s->p[3] == '/' || s->p[3] == '*')) {
-                s->p++; s->lineno++;
+            /* a complicated line continuation handling */
+            p = s->p++;
+            if (*s->p == '\\' && s->p[1] == '\n') {
+                do {
+                    s->p += 2;
+                    s->lineno++;
+                } while (*s->p == '\\' && s->p[1] == '\n');
+            }
+            if (*s->p == '/' || *s->p == '*') {
                 tk->flags |= CPP_TOKEN_SPACE;
-                cpp_lex_comment(s, s->p[2]);
+                cpp_lex_comment(s, *s->p);
                 continue;
-            } else if (s->p[1] == '/' || s->p[1] == '*') {
-                tk->flags |= CPP_TOKEN_SPACE;
-                cpp_lex_comment(s, s->p[1]);
-                continue;
+            } else {
+                /* restore, line continuations can appear anywhere */
+                s->p = p;
             }
         }
 
