@@ -2195,8 +2195,13 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 
 static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 {
+    cpp_macro *m;
     string_ref name = tk->p.ref;
-    cpp_macro *m = hash_table_lookup(&ctx->macro, name);
+
+    if (HAS_FLAG(tk->flags, CPP_TOKEN_NOEXPAND))
+        return 0;
+
+    m = hash_table_lookup(&ctx->macro, name);
     if (m == NULL)
         return 0;
 
@@ -2205,16 +2210,13 @@ static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
         return 0; /* Special; No rescanning needed */
     }
 
-    macro_stack *ms = NULL;
-    cpp_token macro_tk = *tk;
-
-    if (HAS_FLAG(tk->flags, CPP_TOKEN_NOEXPAND))
-        return 0;
-
     if (is_active_macro(ctx, name)) {
         tk->flags |= CPP_TOKEN_NOEXPAND;
         return 0;
     }
+
+    macro_stack *ms = NULL;
+    cpp_token macro_tk = *tk;
 
     if (HAS_FLAG(m->flags, CPP_MACRO_FUNC)) {
         ht_t args;
