@@ -553,7 +553,7 @@ static string_ref search_include_path(const char *name, const char *cwd,
         errno = ENOENT;
     } else {
         if (stat(name, sb) != -1)
-            pathref = string_ref_new(buf);
+            pathref = string_ref_new(name);
     }
 
 done:
