@@ -131,7 +131,7 @@ static string_ref __buffer_new(const char *str, unsigned int __size)
     if (size >= capacity) {
         capacity *= 2;
         buffer = mremap(g_buffer.data, g_buffer.capacity, capacity, MREMAP_MAYMOVE);
-        err_if(g_buffer.data == MAP_FAILED, "unable to allocate string pool: %s",
+        err_if(buffer == MAP_FAILED, "unable to allocate string pool: %s",
                strerror(errno));
         g_buffer.data = buffer;
         g_buffer.capacity = capacity;
