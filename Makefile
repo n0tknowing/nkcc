@@ -6,6 +6,7 @@ OBJS=$(SRCS:.c=.o)
 
 ifdef DEBUG
 	CFLAGS+=-g -Og
+	CFLAGS+=-DXXH_NO_INLINE_HINTS=1
 ifeq ($(DEBUG),asan)
 	CFLAGS+=-fsanitize=address,undefined
 endif
