@@ -4,7 +4,6 @@
  * - Too much assert() calls after allocation.
  * - Better memory allocation strategy for small structs such as macro_stack,
  *   cond_stack, cpp_stream, cpp_macro_arg, etc.
- * - Character constant inside a #if/#elif expression.
  * - Macro argument parsing doesn't work on rarer cases
  *   (Macro call inside macro arg: https://github.com/camel-cdr/bfcpp).
  *
@@ -900,6 +899,92 @@ static cond_expr *cond_expr_number(cpp_context *ctx, cpp_token *tok,
     return ce;
 }
 
+static cond_expr *cond_expr_char(cpp_context *ctx, cpp_token *tok,
+                                 cpp_token **end)
+{
+    uint len;
+    uchar *buf;
+    const uchar *p;
+    ulong val = 0;
+    cond_expr *ce = NULL;
+
+    buf = malloc(tok->length + 1);
+    assert(buf);
+
+    len = cpp_token_splice(tok, buf, tok->length);
+    buf[len] = 0;
+
+    p = buf + 1;
+    if (*p == '\\') {
+        switch (*++p) {
+        case '\"':  val = '\"'; p++; break;
+        case '\'':  val = '\''; p++; break;
+        case '\\':  val = '\\'; p++; break;
+        case '\?':  val = '\?'; p++; break;
+        case 'a':   val = '\a'; p++; break;
+        case 'b':   val = '\b'; p++; break;
+        case 'f':   val = '\f'; p++; break;
+        case 'n':   val = '\n'; p++; break;
+        case 'r':   val = '\r'; p++; break;
+        case 't':   val = '\t'; p++; break;
+        case 'v':   val = '\v'; p++; break;
+        case 'x':
+            p++;
+            if (!isxdigit(*p)) {
+              free(buf);
+              cpp_error(ctx, tok, "'\\x' used with no following hex digits");
+            }
+            while (*p != '\0' && *p != '\'') {
+                ulong d = 0;
+                if (*p >= '0' && *p <= '9')
+                    d = *p - '0';
+                else if (*p >= 'a' && *p <= 'f')
+                    d = *p - 'a' + 10;
+                else if (*p >= 'A' && *p <= 'F')
+                    d = *p - 'A' + 10;
+                val = (val << 4) + d;
+                if (val > 0xff)
+                    goto multi_char;
+                p++;
+            }
+            break;
+        case '0': case '1': case '2': case '3':
+        case '4': case '5': case '6': case '7':
+            while (*p != '\0' && *p != '\'') {
+                if (!isodigit(*p))
+                    goto multi_char;
+                val = (val << 3) + (*p - '0');
+                if (val > 0xff)
+                    goto multi_char;
+                p++;
+            }
+            break;
+        default:
+            len = *p;
+            free(buf);
+            cpp_error(ctx, tok, "unknown escape sequence '\\%c'", (char)len);
+            break;
+        }
+    } else {
+        val = *p++;
+    }
+
+    if (val > 0xff || *p != '\'') {
+multi_char:
+        free(buf);
+        cpp_error(ctx, tok, "multi-character constant inside #if-#else");
+    }
+
+    free(buf);
+
+    ce = cond_expr_new(ctx, *tok);
+    ce->kind = CEXPR_VALUE;
+    ce->v.val.is_unsigned = 0;
+    ce->v.val.v.u = val;
+    *end = tok + 1;
+    return ce;
+}
+
 static cond_expr *cond_expr_parse(cpp_context *ctx, cpp_token *tok,
                                   cpp_token **end, uchar priority)
 {
@@ -947,7 +1032,8 @@ static cond_expr *cond_expr_parse(cpp_context *ctx, cpp_token *tok,
         tok = *end;
         break;
     case TK_char_const:
-        cpp_error(ctx, tok, "character constant is not implemented yet");
+        ce = cond_expr_char(ctx, tok, end);
+        tok = *end;
         break;
     case TK_string:
         cpp_error(ctx, tok, "string literal cannot be used as a value in a"

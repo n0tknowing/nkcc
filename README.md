@@ -4,7 +4,6 @@ For now, only the C preprocessor is implemented.
 
 ## Missing in the preprocessor
 
-- Evaluation of character constant in `#if`/`#elif` expression.
 - Wide char and string.
 - Universal Character Set.
 
