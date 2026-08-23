@@ -905,7 +905,7 @@ static cond_expr *cond_expr_char(cpp_context *ctx, cpp_token *tok,
     uint len;
     uchar *buf;
     const uchar *p;
-    ulong val = 0;
+    long val = 0;
     cond_expr *ce = NULL;
 
     buf = malloc(tok->length + 1);
@@ -935,7 +935,7 @@ static cond_expr *cond_expr_char(cpp_context *ctx, cpp_token *tok,
               cpp_error(ctx, tok, "'\\x' used with no following hex digits");
             }
             while (*p != '\0' && *p != '\'') {
-                ulong d = 0;
+                long d = 0;
                 if (*p >= '0' && *p <= '9')
                     d = *p - '0';
                 else if (*p >= 'a' && *p <= 'f')
@@ -980,7 +980,7 @@ multi_char:
     ce = cond_expr_new(ctx, *tok);
     ce->kind = CEXPR_VALUE;
     ce->v.val.is_unsigned = 0;
-    ce->v.val.v.u = val;
+    ce->v.val.v.s = (char)val;
     *end = tok + 1;
     return ce;
 }
