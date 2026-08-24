@@ -28,6 +28,7 @@ void hash_table_setup(ht_t *ht, unsigned int capacity)
 
     ht->entries = entries;
     ht->count = 0;
+    ht->_count = 0;
     ht->capacity = capacity;
     ht->load_factor = (unsigned int)((double)capacity * 0.80);
 }
@@ -53,12 +54,13 @@ void hash_table_cleanup_with_free(ht_t *ht, void (*free_func)(void *))
     }
 
     free(entries);
-    ht->entries = NULL;
+    memset(ht, 0, sizeof(*ht));
 }
 
 void hash_table_clear(ht_t *ht)
 {
     ht->count = 0;
+    ht->_count = 0;
     memset(ht->entries, 0, ht->capacity * sizeof(ht->entries[0]));
 }
 
@@ -67,7 +69,7 @@ static void __try_resize(ht_t *ht)
     ht_entry_t *old_entries, *entries;
     unsigned int i, idx, old_capacity, capacity, mask;
 
-    if (ht->count < ht->load_factor)
+    if (ht->_count < ht->load_factor)
         return;
 
     capacity = ht->capacity * 2;
@@ -90,25 +92,35 @@ static void __try_resize(ht_t *ht)
 
     free(old_entries);
     ht->entries = entries;
+    ht->_count = ht->count;
     ht->capacity = capacity;
     ht->load_factor = (unsigned int)((double)capacity * 0.80);
 }
 
 static ht_entry_t *__do_lookup(ht_t *ht, string_ref key, uint64_t hash,
-                               unsigned int *i)
+                               ht_entry_t **tombstone)
 {
     unsigned int idx, mask;
+    ht_entry_t *e, *first_tombstone = NULL;
 
     mask = ht->capacity - 1;
     idx = hash & mask;
 
-    while (ht->entries[idx].key != 0 && ht->entries[idx].val != TOMBSTONE) {
-        if (ht->entries[idx].key == key && ht->entries[idx].hash == hash) {
-            if (i) *i = idx;
-            return &ht->entries[idx];
+    while (ht->entries[idx].key != 0) {
+        e = &ht->entries[idx];
+        if (e->val == TOMBSTONE) {
+            if (first_tombstone == NULL)
+                first_tombstone = e;
+        } else if (e->key == key && e->hash == hash) {
+            if (tombstone)
+                *tombstone = first_tombstone;
+            return e;
         }
         idx = (idx + 1) & mask;
     }
+
+    if (tombstone)
+        *tombstone = first_tombstone;
     return NULL;
 }
 
@@ -116,10 +128,10 @@ void *hash_table_insert(ht_t *ht, string_ref key, void *val)
 {
     uint64_t hash;
     unsigned int idx, mask;
-    ht_entry_t *ent_at, ent;
+    ht_entry_t *ent_at, *tombstone = NULL;
 
     hash = string_ref_hash(key);
-    ent_at = __do_lookup(ht, key, hash, NULL);
+    ent_at = __do_lookup(ht, key, hash, &tombstone);
 
     if (ent_at != NULL) {
         void *old_val = ent_at->val;
@@ -127,22 +139,27 @@ void *hash_table_insert(ht_t *ht, string_ref key, void *val)
         return old_val;
     }
 
-    __try_resize(ht);
+    if (tombstone != NULL) {
+        tombstone->key = key;
+        tombstone->val = val;
+        tombstone->hash = hash;
+        goto done;
+    }
 
-    ent.key = key;
-    ent.val = val;
-    ent.hash = hash;
+    __try_resize(ht);
 
     mask = ht->capacity - 1;
     idx = hash & mask;
-    ent_at = &ht->entries[idx];
 
-    while (ent_at->key != 0 && ent_at->val != TOMBSTONE) {
+    while (ht->entries[idx].key != 0)
         idx = (idx + 1) & mask;
-        ent_at = &ht->entries[idx];
-    }
 
-    *ent_at = ent;
+    ht->entries[idx].key = key;
+    ht->entries[idx].val = val;
+    ht->entries[idx].hash = hash;
+
+    ht->_count++;
+done:
     ht->count++;
     return NULL;
 }

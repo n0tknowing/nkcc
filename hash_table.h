@@ -11,6 +11,7 @@ typedef struct {
 
 typedef struct {
     ht_entry_t *entries;
+    unsigned int _count;
     unsigned int count;
     unsigned int capacity;
     unsigned int load_factor;
