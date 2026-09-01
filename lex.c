@@ -238,22 +238,29 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 
 static void cpp_lex_ident(cpp_stream *s, cpp_token *tk)
 {
-    const uchar *p = cpp_buffer_append_ch(&g_lexbuf, *s->p);
+    const uchar *prev, *p2 = s->p;
 
     tk->lineno = s->lineno;
     s->p++;
 
     while (*s->p != 0) {
+        prev = s->p;
         CHECK_ESCNL(s, tk);
+        if (prev != s->p && g_lexbuf.len == 0)
+            cpp_buffer_append(&g_lexbuf, p2, (uint)(prev - p2));
         if (!(isalnum(*s->p) || *s->p == '_'))
             break;
-        cpp_buffer_append_ch(&g_lexbuf, *s->p);
+        if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)))
+            cpp_buffer_append_ch(&g_lexbuf, *s->p);
         s->p++;
     }
 
-    tk->p.ref = string_ref_newlen((const char *)p, g_lexbuf.len);
+    if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)))
+        tk->p.ref = string_ref_newlen((const char *)g_lexbuf.data, g_lexbuf.len);
+    else
+        tk->p.ref = string_ref_newlen((const char *)p2, (uint)(s->p - p2));
     tk->length = string_ref_len(tk->p.ref);
-    cpp_buffer_clear(&g_lexbuf);
+    g_lexbuf.len = 0;
 }
 
 static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
