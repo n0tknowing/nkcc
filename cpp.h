@@ -23,7 +23,7 @@
 
 /* ---- helper macros ------------------------------------------------------ */
 
-#define ALIGN(x, y)    ((x) + ((y) - 1)) & (~((y) - 1))
+#define ALIGN(x, y)    (((x) + ((y) - 1)) & (~((y) - 1)))
 #define MIN(x, y)      ((x) < (y) ? (x) : (y))
 #define MAX(x, y)      ((x) > (y) ? (x) : (y))
 #define HAS_FLAG(x, y) (((x) & (y)) == (y))
