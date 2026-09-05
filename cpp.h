@@ -206,7 +206,8 @@ typedef struct {
 typedef struct {
     uchar flags;
     string_ref param; /* associated parameter */
-    cpp_token_array body; /* argument tokens */
+    cpp_token_array body; /* raw/original/unexpanded argument tokens */
+    cpp_token_array expanded; /* pre-expanded argumen tokens */
 } cpp_macro_arg;
 
 typedef struct cond_stack {

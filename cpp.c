@@ -1736,6 +1736,7 @@ static cpp_macro_arg *macro_arg_new(string_ref param)
     arg->flags = param == g__VA_ARGS__ ? CPP_MACRO_VA_ARG : 0;
     arg->param = param;
     cpp_token_array_setup(&arg->body, 4);
+    cpp_token_array_setup(&arg->expanded, 8);
     return arg;
 }
 
@@ -1743,6 +1744,7 @@ static void macro_arg_free(void *p)
 {
     cpp_macro_arg *arg = (cpp_macro_arg *)p;
     cpp_token_array_cleanup(&arg->body);
+    cpp_token_array_cleanup(&arg->expanded);
     free(arg);
 }
 
@@ -2160,12 +2162,11 @@ static uchar is_active_macro(cpp_context *ctx, string_ref name)
     return 0;
 }
 
-static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
-                       cpp_token_array *os, cpp_token *param_tk)
+static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg)
 {
     cpp_token tk;
-    uint i = os->n;
 
+    cpp_token_array_clear(&arg->expanded);
     arg_stream_push(ctx, arg);
 
     while (1) {
@@ -2176,14 +2177,8 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg,
             ;
         } else {
             tk.flags &= ~CPP_TOKEN_BOL;
-            cpp_token_array_append(os, &tk);
+            cpp_token_array_append(&arg->expanded, &tk);
         }
-    }
-
-    if (i < os->n) {
-        os->tokens[i].flags |= param_tk->flags;
-        if (!PREV_SPACE(param_tk))
-            os->tokens[i].flags &= ~CPP_TOKEN_SPACE;
     }
 
     arg_stream_pop(ctx);
@@ -2262,8 +2257,19 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
                     is++; /* Handle ## in the next iteration */
                 }
             } else {
-                /* Handle argument */
-                expand_arg(ctx, arg, os, is++);
+                uint j = 0;
+                cpp_token *param_tk = is++;
+                cpp_token *at = arg->expanded.tokens;
+                while (j < arg->expanded.n) {
+                    cpp_token_array_append(os, &at[j]);
+                    j++;
+                }
+                if (j > 0) {
+                    uint idx = os->n - j;
+                    os->tokens[idx].flags |= param_tk->flags;
+                    if (!PREV_SPACE(param_tk))
+                        os->tokens[idx].flags &= ~CPP_TOKEN_SPACE;
+                }
             }
             continue;
         }
@@ -2313,6 +2319,12 @@ static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
             return 0;
         }
         collect_args(ctx, m, tk, &args);
+        for (uint pi = 0; pi < m->n_param; pi++) {
+            string_ref pname = m->param[pi];
+            cpp_macro_arg *a = hash_table_lookup(&args, pname);
+            if (a)
+                expand_arg(ctx, a);
+        }
         macro_stack_push(ctx, name);
         ms = ctx->argstream ? ctx->argstream->macro : ctx->file_macro;
         subst(ctx, m, &macro_tk, &args, &ms->tok);
