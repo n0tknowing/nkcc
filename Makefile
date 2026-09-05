@@ -1,6 +1,5 @@
 CC=gcc
-#CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv -g -I/home/nkw/stuff/compiler-ref/pchibicc/include
-CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv -O2
+CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv
 SRCS=buffer.c file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
 OBJS=$(SRCS:.c=.o)
 
@@ -10,6 +9,8 @@ ifdef DEBUG
 ifeq ($(DEBUG),asan)
 	CFLAGS+=-fsanitize=address,undefined
 endif
+else
+	CFLAGS+=-O2
 endif
 
 cpp: $(OBJS)
