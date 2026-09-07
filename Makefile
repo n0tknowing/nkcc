@@ -1,7 +1,9 @@
 CC=gcc
 CFLAGS=-std=c11 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv
+
+BUILDDIR=build
 SRCS=buffer.c file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
-OBJS=$(SRCS:.c=.o)
+OBJS=$(addprefix $(BUILDDIR)/,$(SRCS:.c=.o))
 
 ifdef DEBUG
 	CFLAGS+=-g -Og
@@ -13,10 +15,14 @@ else
 	CFLAGS+=-O2
 endif
 
-cpp: $(OBJS)
+$(BUILDDIR)/cpp: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
-	mkdir -p build
-	mv *.o cpp build
+
+$(BUILDDIR)/%.o: %.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILDDIR):
+	mkdir -p $@
 
 clean:
 	rm -rf build
