@@ -55,9 +55,9 @@
     } while (0)
 
 /* ... */
-#define DEFAULT_POOL_CAPA   512u
-#define DEFAULT_ARRAY_CAPA  512u
-#define DEFAULT_BUFFER_SIZE (1u << 18) /* 256KiB */
+#define DEFAULT_POOL_CAPA   1024u
+#define DEFAULT_ARRAY_CAPA  1024u
+#define DEFAULT_BUFFER_SIZE (1u << 19) /* 512KiB */
 
 /* The pool table.
  * Used to implement Set data structure to find duplicated string efficiently.
