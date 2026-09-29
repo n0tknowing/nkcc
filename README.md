@@ -8,6 +8,3 @@ For now, only the C preprocessor is implemented.
 - Universal Character Set.
 
 ## Wish
-
-- Rewrite in C++. Reason? Just want to focus on the compiler logic itself not
-  stuff like hash table, vector, etc.
