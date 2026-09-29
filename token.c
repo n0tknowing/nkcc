@@ -57,6 +57,8 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
             while (i < len2 && j < bufsz) {
                 if (i + 2 <= len2 && p[i] == '\\' && p[i+1] == '\n')
                     i += 2;
+                else if (i + 3 <= len2 && p[i] == '\\' && p[i+1] == '\r' && p[i+2] == '\n')
+                    i += 3;
                 else
                     buf[j++] = p[i++];
             }
