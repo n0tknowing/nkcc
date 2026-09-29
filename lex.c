@@ -186,7 +186,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         if (*s->p == '=') tk->kind = TK_ne;
         break;
     case '^':
-        if (*s->p == '&') tk->kind = TK_asg_bxor;
+        if (*s->p == '=') tk->kind = TK_asg_bxor;
         break;
     case '#':
         if (*s->p == '#') tk->kind = TK_paste;
