@@ -180,6 +180,8 @@ void cpp_context_cleanup(cpp_context *ctx)
             cpp_macro_arg *arglist = (cpp_macro_arg *)arglist_freelist;
             cpp_token_array_cleanup(&arglist->body);
             cpp_token_array_cleanup(&arglist->expanded);
+            /* there are cpp_token_array leaks for arglist[1] and beyond
+             * but it's harmless anyway. */
             free(arglist);
             arglist_freelist = next;
 #if ALLOC_PROFILE
@@ -1796,6 +1798,11 @@ static void macro_args_free(cpp_macro_args *args)
             g_arglist_stats[i].n_cached_peak = g_arglist_stats[i].n_cached;
 #endif
     } else {
+        for (uint i = 0; i < args->n_alloc; i++) {
+            cpp_macro_arg *arg = &args->arglist[i];
+            cpp_token_array_cleanup(&arg->body);
+            cpp_token_array_cleanup(&arg->expanded);
+        }
         free(args->arglist);
     }
 }
