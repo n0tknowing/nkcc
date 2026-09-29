@@ -10,52 +10,52 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
-static int isodigit(int ch)
+static inline int isodigit(int ch)
 {
     return (unsigned int)ch - '0' < 8;
 }
 
-static int isdigit(int ch)
+static inline int isdigit(int ch)
 {
     return (unsigned int)ch - '0' < 10;
 }
 
-static int isxdigit(int ch)
+static inline int isxdigit(int ch)
 {
     return isdigit(ch) || ((unsigned int)ch | 32) - 'a' < 6;
 }
 
-static int isupper(int ch)
+static inline int isupper(int ch)
 {
     return (unsigned int)ch - 'A' < 26;
 }
 
-static int islower(int ch)
+static inline int islower(int ch)
 {
     return (unsigned int)ch - 'a' < 26;
 }
 
-static int isalpha(int ch)
+static inline int isalpha(int ch)
 {
     return islower(ch) || isupper(ch);
 }
 
-static int isalnum(int ch)
+static inline int isalnum(int ch)
 {
     return isalpha(ch) || isdigit(ch);
 }
 
-static int isspace(int ch)
+static inline int isspace(int ch)
 {
     return ch == ' ' || (unsigned int)ch - '\t' < 5;
 }
 
-static int ispunct(int ch)
+static inline int ispunct(int ch)
 {
     return ((unsigned int)ch - 33 < 94) && !isalnum(ch);
 }
 
-static int tolower(int ch)
+static inline int tolower(int ch)
 {
     return isupper(ch) ? ch | 32 : ch;
 }
