@@ -100,7 +100,7 @@ cpp_file *cpp_file_open2(string_ref _path, string_ref name, struct stat *sb)
     byte_read = 0, offset = 0;
     byte_max = (ssize_t)filesize;
 
-    while (byte_read < byte_max) {
+    while (offset < byte_max) {
         byte_read = read(fd, data + offset, MIN(32768, byte_max - offset));
         if (byte_read < 0) {
             if (errno == EINTR)
