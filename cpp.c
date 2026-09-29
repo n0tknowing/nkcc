@@ -438,7 +438,7 @@ void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
     vfprintf(stderr, s, ap);
     fputc('\n', stderr);
     va_end(ap);
-    cpp_context_cleanup(ctx);
+    if (ctx != NULL) cpp_context_cleanup(ctx);
     exit(1);
 }
 
@@ -2208,14 +2208,14 @@ static void paste(cpp_context *ctx, cpp_token_array *os, cpp_token *rhs,
     cpp_lex_scan(&stream, &tmp);
     if (tmp.kind == TK_eof)
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
+    else if (tmp.kind == TK_identifier)
+        ctx->buf.len = mark;
 
     *lhs = tmp;
 
     cpp_lex_scan(&stream, &tmp);
     if (tmp.kind != TK_eof)
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
-
-    ctx->buf.len = mark;
 }
 
 static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg)
@@ -2558,9 +2558,13 @@ static void do_undef(cpp_context *ctx, cpp_token *tk)
 
     m = hash_table_remove(&ctx->macro, name);
     if (m != NULL) {
-        if (HAS_FLAG(m->flags, CPP_MACRO_GUARD))
+        if (HAS_FLAG(m->flags, CPP_MACRO_GUARD)) {
+            cpp_file *file = cpp_file_no(m->fileno);
             cpp_warn(ctx, tk, "undefining header guard macro '%s'",
                      string_ref_ptr(name));
+            if (file != NULL)
+                hash_table_remove(&ctx->guarded_file, file->path);
+        }
         macro_free((void *)m);
     }
 
