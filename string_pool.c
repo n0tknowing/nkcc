@@ -167,7 +167,7 @@ static string_ref __buffer_new(const char *str, unsigned int __size)
                strerror(errno));
         memset(&g_array.data[g_array.count],
                 0,
-               (capacity - g_array.capacity) * sizeof(unsigned int));
+               (capacity - g_array.capacity) * sizeof(struct string_off));
         g_array.capacity = capacity;
     }
 
