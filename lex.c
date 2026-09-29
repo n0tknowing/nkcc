@@ -1,13 +1,14 @@
 #include "cpp.h"
 
-/* handle complicated "\\\n" */
-#define CHECK_ESCNL(_s, _t) do {                                \
-        if (unlikely(*(_s)->p == '\\' && (_s)->p[1] == '\n')) { \
-            (_s)->p += 2; (_s)->lineno++;                       \
-            (_t)->flags |= CPP_TOKEN_ESCNL;                     \
-        }                                                       \
-    } while (0)
-
+static inline void skip_line_continuation(cpp_stream *s, cpp_token *tk)
+{
+    while (unlikely(*s->p == '\\' &&
+                    (s->p[1] == '\n' || (s->p[1] == '\r' && s->p[2] == '\n')))) {
+        s->lineno++;
+        s->p += (s->p[1] == '\r') ? 3 : 2;
+        if (tk) tk->flags |= CPP_TOKEN_ESCNL;
+    }
+}
 
 /* ------------------------------------------------------------------------- */
 
@@ -17,7 +18,7 @@ static cpp_buffer g_lexbuf;
 void cpp_lex_setup(cpp_context *ctx)
 {
     g_context = ctx;
-    cpp_buffer_setup(&g_lexbuf, 16384);
+    cpp_buffer_setup(&g_lexbuf, 8192);
 }
 
 void cpp_lex_cleanup(cpp_context *ctx)
@@ -48,32 +49,21 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
 
     if (kind == '/') {
         while (*s->p) {
-            if (*s->p == '\\' && s->p[1] == '\n') {
-                s->p += 2;
-                s->lineno++;
-                continue;
-            }
-            if (*s->p == '\n')
-                return;
+            skip_line_continuation(s, NULL);
+            if (*s->p == '\n') return;
             s->p++;
         }
     } else {
         int maybe_done = 0;
         while (*s->p) {
-            if (*s->p == '\\' && s->p[1] == '\n') {
-                s->p += 2;
-                s->lineno++;
-                continue;
-            }
+            skip_line_continuation(s, NULL);
             if (*s->p == '/' && maybe_done) {
                 s->p++;
                 return;
             }
             maybe_done = 0;
-            if (*s->p == '\n')
-                s->lineno++;
-            else if (*s->p == '*')
-                maybe_done = 1;
+            if (*s->p == '\n') s->lineno++;
+            else if (*s->p == '*') maybe_done = 1;
             s->p++;
         }
     }
@@ -91,23 +81,23 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
         s->p++;
 
     while (1) {
-        CHECK_ESCNL(s, tk);
+        skip_line_continuation(s, tk);
         if (*s->p == endq || !*s->p || *s->p == '\n')
             break;
         if (*s->p == '\\') {
             s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (isodigit(*s->p)) {
                 s->p++;
                 do {
-                    CHECK_ESCNL(s, tk);
+                    skip_line_continuation(s, tk);
                     if (!isodigit(*s->p))
                         break;
                 } while (*++s->p);
             } else if (*s->p == 'x') {
                 s->p++;
                 do {
-                    CHECK_ESCNL(s, tk);
+                    skip_line_continuation(s, tk);
                     if (!isxdigit(*s->p))
                         break;
                 } while (*++s->p);
@@ -140,7 +130,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         return;
     }
 
-    CHECK_ESCNL(s, tk);
+    skip_line_continuation(s, tk);
 
     switch (*(tk->p.ptr)) {
     case '+':
@@ -184,7 +174,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
     case '<':
         if (*s->p == '<') {
             s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (*s->p == '=') {
                 s->p++;
                 tk->kind = TK_asg_lshift;
@@ -200,7 +190,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
     case '>':
         if (*s->p == '>') {
             s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (*s->p == '=') {
                 s->p++;
                 tk->kind = TK_asg_rshift;
@@ -216,7 +206,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
     case '.':
         if (*s->p == '.') {
             s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (*s->p == '.') {
                 s->p++;
                 tk->kind = TK_elipsis;
@@ -245,7 +235,7 @@ static void cpp_lex_ident(cpp_stream *s, cpp_token *tk)
 
     while (*s->p != 0) {
         prev = s->p;
-        CHECK_ESCNL(s, tk);
+        skip_line_continuation(s, tk);
         if (prev != s->p && g_lexbuf.len == 0)
             cpp_buffer_append(&g_lexbuf, p2, (uint)(prev - p2));
         if (!(isalnum(*s->p) || *s->p == '_'))
@@ -269,22 +259,18 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
     tk->lineno = s->lineno;
 
     while (*s->p) {
-        CHECK_ESCNL(s, tk);
+        skip_line_continuation(s, tk);
         if (*s->p == '.') {
             tk->flags |= CPP_TOKEN_FLNUM;
             s->p++;
-            CHECK_ESCNL(s, tk);
-            if (!isdigit(*s->p))
-                break;
-            s->p++;
         } else if (tolower(*s->p) == 'e' || tolower(*s->p) == 'p') {
             s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (*s->p == '+' || *s->p == '-') {
                 tk->flags |= CPP_TOKEN_FLNUM;
                 s->p++;
             }
-        } else if (!isalnum(*s->p)) {
+        } else if (!(isalnum(*s->p) || *s->p == '_')) {
             break;
         } else {
             s->p++;
@@ -307,21 +293,13 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
     while (*s->p) {
         /* line continuation */
-        if (*s->p == '\\' && s->p[1] == '\n') {
-            s->p += 2; s->lineno++;
-            continue;
-        }
+        skip_line_continuation(s, NULL);
 
         /* comment */
         if (*s->p == '/') {
             /* a complicated line continuation handling */
             p = s->p++;
-            if (*s->p == '\\' && s->p[1] == '\n') {
-                do {
-                    s->p += 2;
-                    s->lineno++;
-                } while (*s->p == '\\' && s->p[1] == '\n');
-            }
+            skip_line_continuation(s, NULL);
             if (*s->p == '/' || *s->p == '*') {
                 tk->flags |= CPP_TOKEN_SPACE;
                 cpp_lex_comment(s, *s->p);
@@ -373,20 +351,27 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         /* number or punctuator */
         if (*s->p == '.') {
             p = s->p++;
-            CHECK_ESCNL(s, tk);
+            skip_line_continuation(s, tk);
             if (isdigit(*s->p)) {
                 s->p = p;
                 cpp_lex_number(s, tk);
                 tk->kind = TK_number;
                 return;
             }
-            /* else fallthrough to scan punctuator */
+            /* else punctuator */
             s->p = p;
+            goto do_punct;
         }
 
         /* punctuator */
-        cpp_lex_punct(s, tk);
-        return;
+        if (ispunct(*s->p)) {
+    do_punct:
+            cpp_lex_punct(s, tk);
+            return;
+        }
+
+        /* TODO: handle unknown char */
+        assert(0);
     }
 
     tk->lineno = s->lineno;
