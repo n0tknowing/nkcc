@@ -45,7 +45,6 @@
  *
  */
 
-#define _GNU_SOURCE
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -75,9 +74,9 @@
     } while (0)
 
 /* ... */
-#define DEFAULT_POOL_CAPA   1024u
-#define DEFAULT_ARRAY_CAPA  1024u
-#define DEFAULT_BUFFER_SIZE (1u << 19) /* 512KiB */
+#define DEFAULT_POOL_CAPA   4096u
+#define DEFAULT_ARRAY_CAPA  4096u
+#define DEFAULT_BUFFER_SIZE (1u << 21) /* 2MiB */
 
 /* The pool table.
  * Used to implement Set data structure to find duplicated string efficiently.
@@ -148,15 +147,7 @@ static string_ref __buffer_new(const char *str, unsigned int __size)
     capacity = g_buffer.capacity;
     size = prev_size + __size + 1;
 
-    if (size >= capacity) {
-        capacity *= 2;
-        buffer = mremap(g_buffer.data, g_buffer.capacity, capacity, MREMAP_MAYMOVE);
-        err_if(buffer == MAP_FAILED, "unable to allocate string pool: %s",
-               strerror(errno));
-        g_buffer.data = buffer;
-        g_buffer.capacity = capacity;
-    }
-
+    err_if(size >= capacity, "string pool exhausted (%u)", capacity);
     memcpy(buffer + prev_size, str, __size);
     g_buffer.count = size;
 
