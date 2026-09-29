@@ -2,10 +2,15 @@
 
 void cpp_buffer_setup(cpp_buffer *buf, uint cap)
 {
-    uchar *data = mmap(NULL, CPP_BUFFER_MAX, PROT_READ|PROT_WRITE,
-                       MAP_PRIVATE|MAP_ANON, -1, 0);
+    size_t size = MIN(cap, CPP_BUFFER_MAX);
+    uchar *data = mmap(NULL,
+                       size,
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANON,
+                       -1,
+                       0);
     if (unlikely(data == MAP_FAILED))
-        cpp_error(NULL, NULL, "cpp_buffer fails to allocate %u bytes", cap);
+        cpp_error(NULL, NULL, "cpp_buffer fails to allocate %zu bytes", size);
 
     buf->data = data;
     buf->len = 0;
@@ -34,7 +39,7 @@ const uchar *cpp_buffer_append_ch(cpp_buffer *buf, uchar ch)
 {
     const uchar *r = NULL;
 
-    if (unlikely(buf->len + sizeof(uchar) >= buf->cap))
+    if (unlikely(buf->len + sizeof(ch) >= buf->cap))
         cpp_error(NULL, NULL, "cpp_buffer out of memory");
     else
         r = buf->data + buf->len;
