@@ -42,10 +42,10 @@
 
 /* ---- typedefs ----------------------------------------------------------- */
 
-typedef unsigned char uchar;
-typedef unsigned short ushort;
-typedef unsigned int uint;
-typedef unsigned long ulong;
+typedef uint8_t uchar;
+typedef uint16_t ushort;
+typedef uint32_t uint;
+typedef uint64_t ulong;
 typedef unsigned int tkchar;
 
 
@@ -76,6 +76,8 @@ typedef unsigned int tkchar;
 #define CPP_MACRO_BUILTIN   2 /* this macro is builtin macros */
 #define CPP_MACRO_VA_ARG    4 /* this macro arg is variadic args */
 #define CPP_MACRO_GUARD     8 /* this macro is used as header guard */
+#define CPP_MACRO_DISABLED 16 /* this macro is currently expanding */
+
 /* limits for cpp_macro */
 #define CPP_MACRO_MAX       16384 /* per translation unit */
 
@@ -159,11 +161,14 @@ enum _cpp_token_kind {
     TK_number,
     TK_eom, /* used to indicate the end of a macro replacement list and
                rescanning phase */
+    TK_eoa, /* used to indicate the end of a macro argument */
     TK_eof = 255
 };
 
 
 /* ---- structs and unions ------------------------------------------------- */
+
+typedef struct cpp_macro cpp_macro;
 
 typedef struct {
     uchar flags;
@@ -184,6 +189,7 @@ typedef struct {
     uint length;
     union {
         string_ref ref; /* for TK_identifier */
+        cpp_macro *macro; /* for TK_eom */
         const uchar *ptr; /* for the rest */
     } p;
 } cpp_token;
@@ -194,14 +200,14 @@ typedef struct {
     cpp_token *tokens;
 } cpp_token_array;
 
-typedef struct {
+struct cpp_macro {
     uchar flags;
     ushort fileno;
     uint n_param;
     string_ref name;
     string_ref *param;
     cpp_token_array body;
-} cpp_macro;
+};
 
 typedef struct {
     uchar flags;
@@ -209,6 +215,12 @@ typedef struct {
     cpp_token_array body; /* raw/original/unexpanded argument tokens */
     cpp_token_array expanded; /* pre-expanded argumen tokens */
 } cpp_macro_arg;
+
+typedef struct {
+    uint n_arg;
+    uint n_alloc; /* for freelist */
+    cpp_macro_arg *arglist;
+} cpp_macro_args;
 
 typedef struct cond_stack {
     uchar flags;
@@ -252,17 +264,28 @@ typedef struct cond_expr {
     } v;
 } cond_expr;
 
-typedef struct macro_stack {
-    string_ref name;
+typedef struct expansion_stream {
     cpp_token_array tok; /* used during substitution */
     const cpp_token *p; /* substituted, used during rescanning from `tok` */
-    struct macro_stack *prev; /* nested */
-} macro_stack;
+    struct expansion_stream *prev; /* nested */
+} expansion_stream;
 
 typedef struct {
-    macro_stack *head;
-    macro_stack *tail;
-} macro_stack_cache;
+    expansion_stream *head;
+    expansion_stream *tail;
+} expansion_stream_cache;
+
+/*
+ * !!!!!!!!!! WARNING !!!!!!!!!!
+ *
+ * 1. MAKE SURE sizeof(object) >= sizeof(generic_freelist)
+ * 2. THE FIRST 8 BYTES OF object WILL ALWAYS BE CLOBBERED
+ *
+ * !!!!!!!!!! WARNING !!!!!!!!!!
+ */
+typedef struct generic_freelist {
+    struct generic_freelist *next;
+} generic_freelist;
 
 typedef struct cpp_buffer {
     uchar *data;
@@ -283,26 +306,14 @@ typedef struct cpp_stream {
     struct cpp_stream *prev; /* #include may modify this */
 } cpp_stream;
 
-typedef struct arg_stream {
-    const cpp_token *p; /* the tokens in an argument from cpp_macro_arg::body */
-    macro_stack *macro;
-    struct arg_stream *prev;
-} arg_stream;
-
-typedef struct {
-    arg_stream *head;
-    arg_stream *tail;
-} arg_stream_cache;
-
 /*
  * `ts` is the token array after preprocessing a file, used by later phases.
  * `temp` is token array for backtrack.
  * `line` is token array for expanding macros in #if/#elif/#line/#include.
- *        unlike macro expansion in `file_macro` and `argstream`, it's
+ *        unlike macro expansion in `es` and `argstream`, it's
  *        recycled.
  * `stream` is the file stream that's being preprocessed.
- * `file_macro` is where all macros expanded in a translation unit.
- * `argstream` is a fake stream that's used when expanding a macro argument.
+ * `es` is where all macros expanded in a translation unit.
  * `macro` is where all macros in a translation unit defined.
  * `cached_file` is used to store cpp_file that's not guarded either by header
  *               guard or #pragma once, so we can avoid reading the same file.
@@ -317,8 +328,7 @@ typedef struct {
     cpp_token_array temp;
     cpp_token_array line;
     cpp_stream *stream;
-    macro_stack *file_macro;
-    arg_stream *argstream;
+    expansion_stream *es;
     ht_t macro;
     ht_t cached_file;
     ht_t guarded_file;
@@ -369,10 +379,34 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, const cpp_token *tk);
 void cpp_token_unpp(const cpp_token *tk);
 uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
-void cpp_token_array_setup(cpp_token_array *ts, uint max);
-void cpp_token_array_clear(cpp_token_array *ts);
-void cpp_token_array_append(cpp_token_array *ts, const cpp_token *tk);
-void cpp_token_array_move(cpp_token_array *dts, cpp_token_array *sts);
-void cpp_token_array_cleanup(cpp_token_array *ts);
+
+#define cpp_token_array_setup(_ts_, _max_) \
+    do { \
+        (_ts_)->tokens = malloc((_max_) * sizeof(cpp_token)); \
+        assert((_ts_)->tokens); \
+        (_ts_)->n = 0; \
+        (_ts_)->max = (_max_); \
+    } while (0)
+
+#define cpp_token_array_clear(_ts_) ((_ts_)->n = 0)
+
+#define cpp_token_array_cleanup(_ts_) \
+    do { \
+        if ((_ts_) != NULL && (_ts_)->tokens != NULL) { \
+            free((_ts_)->tokens); \
+            (_ts_)->tokens = NULL; \
+            (_ts_)->n = (_ts_)->max = 0; \
+        } \
+    } while (0)
+
+#define cpp_token_array_append(_ts_, _tk_)  \
+    do {    \
+        if ((_ts_)->n >= (_ts_)->max) { \
+            (_ts_)->max = (_ts_)->max ? (_ts_)->max * 2 : 8; \
+            (_ts_)->tokens = realloc((_ts_)->tokens, (_ts_)->max * sizeof(cpp_token)); \
+            assert((_ts_)->tokens); \
+        } \
+        (_ts_)->tokens[(_ts_)->n++] = *(_tk_); \
+    } while (0)
 
 #endif
