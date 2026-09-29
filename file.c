@@ -39,6 +39,8 @@ void cpp_file_cleanup(void)
         cpp_file *f = &g_files[i];
         free(f->data);
     }
+
+    g_file_count = 1;
 }
 
 cpp_file *cpp_file_open(const char *path, const char *name)
