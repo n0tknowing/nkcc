@@ -34,7 +34,7 @@ void cpp_buffer_setup(cpp_buffer *buf, uint cap)
 
     buf->data = data;
     buf->len = 0;
-    buf->cap = cap;
+    buf->cap = size;
 }
 
 void cpp_buffer_cleanup(cpp_buffer *buf)
