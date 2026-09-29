@@ -71,6 +71,7 @@ static string_ref g__VA_ARGS__,
                   g__TIMESTAMP__,
                   g_defined;
 
+static cpp_stream g_stream_tmp;
 static char *g_include_search_path[CPP_SEARCHPATH_MAX];
 static int g_include_search_path_count;
 static cond_expr g_cond_expr[CPP_CONDEXPR_MAX];
@@ -320,7 +321,6 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
 void cpp_macro_define(cpp_context *ctx, const char *in)
 {
     cpp_token tk;
-    cpp_stream s;
     const char *p;
     uint len1, len2;
     const uchar *sp;
@@ -341,16 +341,16 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
 
     cpp_buffer_append(&ctx->buf, (const uchar *)"\n\0", 2);
 
-    s.flags = 0;
-    s.lineno = 1;
-    s.pplineno_loc = s.pplineno_val = 0;
-    s.fname = s.ppfname = string_ref_ptr(f->name);
-    s.p = sp;
-    s.file = f;
-    s.prev = NULL;
-    s.cond = NULL;
+    g_stream_tmp.flags = 0;
+    g_stream_tmp.lineno = 1;
+    g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
+    g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
+    g_stream_tmp.p = sp;
+    g_stream_tmp.file = f;
+    g_stream_tmp.prev = NULL;
+    g_stream_tmp.cond = NULL;
 
-    ctx->stream = &s;
+    ctx->stream = &g_stream_tmp;
     do_define(ctx, &tk);
     ctx->stream = NULL;
 }
@@ -358,23 +358,22 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
 void cpp_macro_undefine(cpp_context *ctx, const char *in)
 {
     cpp_token tk;
-    cpp_stream s;
     const uchar *sp;
     cpp_file *f = cpp_file_no(0);
 
     sp = cpp_buffer_append(&ctx->buf, (const uchar *)in, strlen(in));
     cpp_buffer_append(&ctx->buf, (const uchar *)"\n\0", 2);
 
-    s.flags = 0;
-    s.lineno = 1;
-    s.pplineno_loc = s.pplineno_val = 0;
-    s.fname = s.ppfname = string_ref_ptr(f->name);
-    s.p = sp;
-    s.file = f;
-    s.prev = NULL;
-    s.cond = NULL;
+    g_stream_tmp.flags = 0;
+    g_stream_tmp.lineno = 1;
+    g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
+    g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
+    g_stream_tmp.p = sp;
+    g_stream_tmp.file = f;
+    g_stream_tmp.prev = NULL;
+    g_stream_tmp.cond = NULL;
 
-    ctx->stream = &s;
+    ctx->stream = &g_stream_tmp;
     do_undef(ctx, &tk);
     ctx->stream = NULL;
 }
@@ -562,7 +561,8 @@ static void cpp_stream_pop(cpp_context *ctx)
 {
     if (ctx->stream != NULL) {
         cpp_stream *prev = ctx->stream->prev;
-        free(ctx->stream);
+        if (ctx->stream != &g_stream_tmp)
+            free(ctx->stream);
         ctx->stream = prev;
     }
 }
