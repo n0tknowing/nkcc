@@ -12,7 +12,7 @@ ifeq ($(DEBUG),asan)
 	CFLAGS+=-fsanitize=address,undefined
 endif
 else
-	CFLAGS+=-O2 -march=native
+	CFLAGS+=-O2 -march=native -flto
 endif
 
 $(BUILDDIR)/cpp: $(OBJS)
