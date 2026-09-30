@@ -391,7 +391,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         }
 
         /* TODO: handle unknown char */
-        assert(0);
+        abort();
     }
 
     tk->lineno = s->lineno;
