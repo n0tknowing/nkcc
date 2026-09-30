@@ -52,8 +52,9 @@
 #define LITREF(x)      string_ref_newlen((x), sizeof((x)) - 1)
 
 #if defined(__GNUC__) || defined(__clang__)
-#define likely(x)      (__builtin_expect(!!(x), 1))
-#define unlikely(x)    (__builtin_expect(!!(x), 0))
+#define likely(x)       (__builtin_expect(!!(x), 1))
+#define unlikely(x)     (__builtin_expect(!!(x), 0))
+#define always_inline   inline __attribute__((always_inline))
 #else
 #define likely(x)      x
 #define unlikely(x)    x
@@ -400,33 +401,37 @@ void cpp_token_print(FILE *fp, const cpp_token *tk);
 void cpp_token_unpp(const cpp_token *tk);
 uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
 
-#define cpp_token_array_setup(_ts_, _max_) \
-    do { \
-        (_ts_)->tokens = malloc((_max_) * sizeof(cpp_token)); \
-        assert((_ts_)->tokens); \
-        (_ts_)->n = 0; \
-        (_ts_)->max = (_max_); \
-    } while (0)
+static always_inline void cpp_token_array_setup(cpp_token_array *ts, uint max)
+{
+    ts->tokens = malloc(max * sizeof(cpp_token));
+    assert(ts->tokens);
+    ts->n = 0;
+    ts->max = max;
+}
 
-#define cpp_token_array_clear(_ts_) ((_ts_)->n = 0)
+static always_inline void cpp_token_array_clear(cpp_token_array *ts)
+{
+    ts->n = 0;
+}
 
-#define cpp_token_array_cleanup(_ts_) \
-    do { \
-        if ((_ts_) != NULL && (_ts_)->tokens != NULL) { \
-            free((_ts_)->tokens); \
-            (_ts_)->tokens = NULL; \
-            (_ts_)->n = (_ts_)->max = 0; \
-        } \
-    } while (0)
+static always_inline void cpp_token_array_cleanup(cpp_token_array *ts)
+{
+    if (ts != NULL && ts->tokens != NULL) {
+        free(ts->tokens);
+        ts->tokens = NULL;
+        ts->n = ts->max = 0;
+    }
+}
 
-#define cpp_token_array_append(_ts_, _tk_)  \
-    do {    \
-        if ((_ts_)->n >= (_ts_)->max) { \
-            (_ts_)->max = (_ts_)->max ? (_ts_)->max * 2 : 8; \
-            (_ts_)->tokens = realloc((_ts_)->tokens, (_ts_)->max * sizeof(cpp_token)); \
-            assert((_ts_)->tokens); \
-        } \
-        (_ts_)->tokens[(_ts_)->n++] = *(_tk_); \
-    } while (0)
+static always_inline void cpp_token_array_append(cpp_token_array *ts,
+                                                 const cpp_token *tk)
+{
+    if (ts->n >= ts->max) {
+        ts->max = ts->max ? ts->max * 2 : 8;
+        ts->tokens = realloc(ts->tokens, ts->max * sizeof(cpp_token));
+        assert(ts->tokens);
+    }
+    ts->tokens[ts->n++] = *tk;
+}
 
 #endif
