@@ -104,7 +104,7 @@ struct pool_array {
     uint32_t capacity;
 };
 
-/* A giant mmap()-ed dynamic buffer to store the strings, contiguously.
+/* A giant mmap()-ed buffer to store the strings, contiguously.
  * Each string is guaranteed to be '\0'-terminated.
  */
 struct pool_buffer {
@@ -175,14 +175,14 @@ static uint64_t __do_hash(const char *data, unsigned int len)
 
 static string_ref __lookup(const char *s0, uint64_t hash, unsigned int len)
 {
-    const char *ptr;
     string_ref s, *strings = g_pool.data;
     unsigned int idx, mask = g_pool.capacity - 1;
 
     idx = hash & mask;
     while ((s = strings[idx]) != 0) {
-        ptr = g_buffer.data + g_array.data[s].offset;
-        if (g_array.data[s].length == len && !memcmp(ptr, s0, len))
+        struct string_off *so = &g_array.data[s];
+        const char *s1 = g_buffer.data + so->offset;
+        if (so->hash == hash && so->length == len && !memcmp(s1, s0, len))
             return s;
         idx = (idx + 1) & mask;
     }
