@@ -406,11 +406,6 @@ static void cpp_next(cpp_context *ctx, cpp_token *tk)
             expansion_stream_pop(ctx);
             continue;
         }
-        if (t->kind == TK_eoa) {
-            *tk = *t;
-            ctx->es->p++;
-            return;
-        }
         *tk = *t;
         ctx->es->p++;
         return;
