@@ -2562,10 +2562,9 @@ static void do_undef(cpp_context *ctx, cpp_token *tk)
     if (m != NULL) {
         if (HAS_FLAG(m->flags, CPP_MACRO_GUARD)) {
             cpp_file *file = cpp_file_no(m->fileno);
+            hash_table_remove(&ctx->guarded_file, file->path);
             cpp_warn(ctx, tk, "undefining header guard macro '%s'",
                      string_ref_ptr(name));
-            if (file != NULL)
-                hash_table_remove(&ctx->guarded_file, file->path);
         }
         macro_free((void *)m);
     }
