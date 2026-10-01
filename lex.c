@@ -20,7 +20,7 @@
 
 #include "cpp.h"
 
-static inline void skip_line_continuation(cpp_stream *s, cpp_token *tk)
+static always_inline void skip_line_continuation(cpp_stream *s, cpp_token *tk)
 {
     while (unlikely(*s->p == '\\' &&
                     (s->p[1] == '\n' || (s->p[1] == '\r' && s->p[2] == '\n')))) {
@@ -139,6 +139,7 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
 
 static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 {
+    uchar found_digraph = 0;
     tk->lineno = s->lineno;
     tk->p.ptr = s->p;
     tk->kind = *s->p;
@@ -169,7 +170,35 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         if (*s->p == '=') tk->kind = TK_asg_div;
         break;
     case '%':
-        if (*s->p == '=') tk->kind = TK_asg_mod;
+        if (*s->p == '=') {
+            tk->kind = TK_asg_mod;
+        } else if (*s->p == '>') {
+            found_digraph = 1;
+            tk->kind = '}'; /* digraph %> become } */
+        } else if (*s->p == ':') {
+            s->p++;
+            skip_line_continuation(s, tk);
+            if (*s->p == '%') {
+                const uchar *p = s->p++;
+                skip_line_continuation(s, tk);
+                if (*s->p == ':') {
+                    /* digraph %:%: become ## */
+                    s->p++;
+                    tk->kind = TK_paste;
+                } else {
+                    /* can't find final ':', token becomes # (%:), put '%' back
+                     * to the stream...
+                     * may you burn in eternal hell if doing this */
+                    s->p = p;
+                    tk->kind = '#';
+                }
+            } else {
+                /* digraph %: become # */
+                tk->kind = '#';
+            }
+            tk->length = (uint)(s->p - tk->p.ptr);
+            return;
+        }
         break;
     case '&':
         if (*s->p == '&') tk->kind = TK_and;
@@ -191,6 +220,12 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
     case '#':
         if (*s->p == '#') tk->kind = TK_paste;
         break;
+    case ':':
+        if (*s->p == '>') {
+            found_digraph = 1;
+            tk->kind = ']'; /* digraph :> become ] */
+        }
+        break;
     case '<':
         if (*s->p == '<') {
             s->p++;
@@ -205,6 +240,12 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             return;
         } else if (*s->p == '=') {
             tk->kind = TK_le;
+        } else if (*s->p == ':') { /* digraph <: become [ */
+            found_digraph = 1;
+            tk->kind = '[';
+        } else if (*s->p == '%') { /* digraph <% become { */
+            found_digraph = 1;
+            tk->kind = '{';
         }
         break;
     case '>':
@@ -236,7 +277,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         break;
     }
 
-    if (tk->kind >= TK_elipsis) {
+    if (tk->kind >= TK_elipsis || found_digraph) {
         if (tk->kind != TK_elipsis) s->p++;
         tk->length = (uint)(s->p - tk->p.ptr);
     } else {

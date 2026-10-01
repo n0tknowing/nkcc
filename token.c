@@ -116,11 +116,6 @@ void cpp_token_print(FILE *fp, const cpp_token *tk)
     if (PREV_SPACE(tk))
         fwrite((const void *)" ", 1, 1, fp);
 
-    if (tk->kind < 128) {
-        fwrite(tk->p.ptr, 1, 1, fp);
-        return;
-    }
-
     if (tk->kind == TK_identifier) {
         p = (const uchar *)string_ref_ptr(tk->p.ref);
         len = string_ref_len(tk->p.ref);
