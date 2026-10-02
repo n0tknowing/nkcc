@@ -69,8 +69,10 @@ static string_ref g__VA_ARGS__,
                   g__TIME__,
                   g__BASE_FILE__,
                   g__TIMESTAMP__,
+                  g__COUNTER__,
                   g_defined;
 
+static uint g_counter;
 static cpp_stream g_stream_tmp;
 static char *g_include_search_path[CPP_SEARCHPATH_MAX];
 static int g_include_search_path_count;
@@ -134,6 +136,7 @@ void cpp_context_setup(cpp_context *ctx)
     g__TIMESTAMP__ = LITREF("__TIMESTAMP__");
     g__DATE__ = LITREF("__DATE__");
     g__TIME__ = LITREF("__TIME__");
+    g__COUNTER__ = LITREF("__COUNTER__");
     g_defined = LITREF("defined");
 
     memset(ctx, 0, sizeof(cpp_context));
@@ -1616,6 +1619,7 @@ static void builtin_macro_setup(cpp_context *ctx)
     ADD_BUILTIN(g__TIMESTAMP__);
     ADD_BUILTIN(g__DATE__);
     ADD_BUILTIN(g__TIME__);
+    ADD_BUILTIN(g__COUNTER__);
     ADD_BUILTIN(g_defined);
 }
 
@@ -2075,6 +2079,11 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
         dt = 1;
         macro_tk->p.ptr = ctx->pptime;
         macro_tk->kind = TK_string;
+    } else if (name == g__COUNTER__) {
+        if (g_counter == INT_MAX)
+            cpp_error(ctx, macro_tk, "__COUNTER__ reached %u\n", INT_MAX);
+        len = snprintf(buf, sizeof(buf), "%u", g_counter++);
+        macro_tk->kind = TK_number;
     } else if (name == g_defined) {
         if (!is_expr)
             return;
