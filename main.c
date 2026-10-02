@@ -23,7 +23,7 @@
 static void usage(int exit_code)
 {
     puts("Usage:");
-    puts("  cpp [-EPT] [-D MACRO=VAL] [-I DIR] [-o OUT_FILE] [-U MACRO] FILE");
+    puts("  nkcc [-EPT] [-D MACRO=VAL] [-I DIR] [-o OUT_FILE] [-U MACRO] FILE");
     puts("");
     puts("Options:");
     puts("  -D MACRO=VAL    Define MACRO to VAL (or 1 if VAL omitted)");

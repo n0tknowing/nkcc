@@ -15,7 +15,7 @@ else
 	CFLAGS+=-O2 -march=native -flto
 endif
 
-$(BUILDDIR)/cpp: $(OBJS)
+$(BUILDDIR)/nkcc: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
