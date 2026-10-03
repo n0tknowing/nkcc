@@ -1578,7 +1578,7 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
     if (tk->kind != '\n')
         cpp_error(ctx, tk, "stray token after #endif");
 
-    cpp_next(ctx, tk);
+    cpp_next_nonl(ctx, tk);
     if (tk->kind == TK_eof) {
         guard_name = ctx->stream->cond->guard_name;
         if (ctx->stream->cond->prev == NULL

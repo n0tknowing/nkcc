@@ -1,0 +1,7 @@
+
+#ifndef INCLUDE_GUARD_WS2_H
+#define INCLUDE_GUARD_WS2_H
+FOO_WS2
+#endif
+
+

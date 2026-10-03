@@ -1,0 +1,5 @@
+#ifndef INCLUDE_GUARD_FAIL_H
+#define INCLUDE_GUARD_FAIL_H
+GUARD
+#endif
+FAIL
