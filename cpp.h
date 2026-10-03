@@ -325,7 +325,7 @@ typedef struct cpp_stream {
 
 /*
  * `ts` is the token array after preprocessing a file, used by later phases.
- * `temp` is token array for backtrack.
+ * `pending` is token array for backtrack.
  * `line` is token array for expanding macros in #if/#elif/#line/#include.
  * `stream` is the file stream that's being preprocessed.
  * `es` is where all macros expanded in a translation unit.
@@ -340,7 +340,7 @@ typedef struct cpp_stream {
 typedef struct {
     uchar flags;
     cpp_token_array ts;
-    cpp_token_array temp;
+    cpp_token_array pending;
     cpp_token_array line;
     cpp_stream *stream;
     expansion_stream *es;

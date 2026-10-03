@@ -151,7 +151,7 @@ void cpp_context_setup(cpp_context *ctx)
     hash_table_setup(&ctx->guarded_file, 32);
     hash_table_setup(&ctx->macro, 1024);
 
-    cpp_token_array_setup(&ctx->temp, 4);
+    cpp_token_array_setup(&ctx->pending, 8);
     cpp_token_array_setup(&ctx->line, 8);
 
     cpp_lex_setup(ctx);
@@ -210,7 +210,7 @@ void cpp_context_cleanup(cpp_context *ctx)
     cpp_buffer_cleanup(&ctx->buf);
 
     cpp_token_array_cleanup(&ctx->line);
-    cpp_token_array_cleanup(&ctx->temp);
+    cpp_token_array_cleanup(&ctx->pending);
     cpp_token_array_cleanup(&ctx->ts);
 
     hash_table_cleanup(&ctx->cached_file);
@@ -392,12 +392,12 @@ static void cpp_next(cpp_context *ctx, cpp_token *tk)
     cpp_macro *m;
 
     /* Backtrack */
-    if (unlikely(ctx->temp.n != 0)) {
+    if (unlikely(ctx->pending.n != 0)) {
         uint i;
-        *tk = ctx->temp.tokens[0];
-        for (i = 1; i < ctx->temp.n; i++)
-            ctx->temp.tokens[i - 1] = ctx->temp.tokens[i];
-        ctx->temp.n--;
+        *tk = ctx->pending.tokens[0];
+        for (i = 1; i < ctx->pending.n; i++)
+            ctx->pending.tokens[i - 1] = ctx->pending.tokens[i];
+        ctx->pending.n--;
         return;
     }
 
@@ -804,8 +804,8 @@ static void cond_stack_skip(cpp_context *ctx, cpp_token *tk)
             dkind = tk->p.ref;
             if (nested == 0 && (dkind == g_else || dkind == g_elif ||
                                 dkind == g_endif)) {
-                cpp_token_array_append(&ctx->temp, &hash);
-                cpp_token_array_append(&ctx->temp, tk);
+                cpp_token_array_append(&ctx->pending, &hash);
+                cpp_token_array_append(&ctx->pending, tk);
                 return;
             } else if (dkind == g_if || dkind == g_ifdef ||
                        dkind == g_ifndef) {
@@ -1480,19 +1480,19 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
         if (tk->kind == '\n') {
             return;
         } else if (tk->kind != TK_identifier) {
-            cpp_token_array_append(&ctx->temp, &hash);
+            cpp_token_array_append(&ctx->pending, &hash);
             goto putback;
         }
         dkind = tk->p.ref;
         if (dkind != g_define) {
-            cpp_token_array_append(&ctx->temp, &hash);
+            cpp_token_array_append(&ctx->pending, &hash);
             goto putback;
         }
         dir = *tk;
         cpp_next(ctx, tk);
         if (tk->kind != TK_identifier) {
-            cpp_token_array_append(&ctx->temp, &hash);
-            cpp_token_array_append(&ctx->temp, &dir);
+            cpp_token_array_append(&ctx->pending, &hash);
+            cpp_token_array_append(&ctx->pending, &dir);
             goto putback;
         }
         guard_name = tk->p.ref;
@@ -1500,10 +1500,10 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
             ctx->stream->cond->flags |= CPP_COND_GUARD;
             ctx->stream->cond->guard_name = guard_name;
         }
-        cpp_token_array_append(&ctx->temp, &hash);
-        cpp_token_array_append(&ctx->temp, &dir);
+        cpp_token_array_append(&ctx->pending, &hash);
+        cpp_token_array_append(&ctx->pending, &dir);
     putback:
-        cpp_token_array_append(&ctx->temp, tk);
+        cpp_token_array_append(&ctx->pending, tk);
     }
 }
 
@@ -1592,7 +1592,7 @@ static void do_endif(cpp_context *ctx, cpp_token *tk)
         }
     }
 
-    cpp_token_array_append(&ctx->temp, tk);
+    cpp_token_array_append(&ctx->pending, tk);
     cond_stack_pop(ctx);
 }
 
@@ -2416,7 +2416,7 @@ static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
         cpp_macro_args args;
         cpp_next_nonl(ctx, tk);
         if (tk->kind != '(') {
-            cpp_token_array_append(&ctx->temp, tk);
+            cpp_token_array_append(&ctx->pending, tk);
             *tk = macro_tk;
             return 0;
         }
