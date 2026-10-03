@@ -52,12 +52,13 @@
 #define LITREF(x)      string_ref_newlen((x), sizeof((x)) - 1)
 
 #if defined(__GNUC__) || defined(__clang__)
-#define likely(x)       (__builtin_expect(!!(x), 1))
-#define unlikely(x)     (__builtin_expect(!!(x), 0))
-#define always_inline   inline __attribute__((always_inline))
+# define likely(x)       (__builtin_expect(!!(x), 1))
+# define unlikely(x)     (__builtin_expect(!!(x), 0))
+# define always_inline   inline __attribute__((always_inline))
 #else
-#define likely(x)      x
-#define unlikely(x)    x
+# define likely(x)      (x)
+# define unlikely(x)    (x)
+# define always_inline  inline
 #endif
 
 
@@ -73,34 +74,29 @@ typedef unsigned int tkchar;
 /* ---- flags and limits --------------------------------------------------- */
 
 /* flags for cpp_file */
-#define CPP_FILE_NONL        1 /* no newline at end of file */
+#define CPP_FILE_NONL        (1<<0) /* no newline at end of file */
 /* limits for cpp_file */
-#define CPP_FILE_MAX_USED    1024 /* it's still too big */
+#define CPP_FILE_MAX_USED    4096 /* it's still too big */
 #define CPP_FILE_MAX_SIZE    (1U << 31) /* 2GiB */
 
 /* flags for cpp_token */
-#define CPP_TOKEN_BOF       1 /* token is at beginning of file */
-#define CPP_TOKEN_BOL       2 /* token is at beginning of line */
-#define CPP_TOKEN_NOEXPAND  4 /* token is macro and cannot be expanded again */
-#define CPP_TOKEN_ESCNL     8 /* there is "\\\n" in the token */
-#define CPP_TOKEN_FLNUM    16 /* token is floating constant */
-#define CPP_TOKEN_SPACE    32 /* token is followed by whitespace */
+#define CPP_TOKEN_BOF       (1<<0) /* beginning of file */
+#define CPP_TOKEN_BOL       (1<<1) /* beginning of line */
+#define CPP_TOKEN_NOEXPAND  (1<<2) /* token-level disabling context */
+#define CPP_TOKEN_ESCNL     (1<<3) /* there is "\\\n" in the token */
+#define CPP_TOKEN_FLNUM     (1<<4) /* floating number constant */
+#define CPP_TOKEN_SPACE     (1<<5) /* preceded by whitespace */
 
 /* flags for cond_stack */
-#define CPP_COND_SKIP       1 /* we are looking for #elif/#else/#endif */
-#define CPP_COND_GUARD      2 /* #ifdef ... #define was checked */
-/* limits for cond_stack */
-#define CPP_COND_MAX       32 /* nested, per file */
+#define CPP_COND_SKIP       (1<<0) /* we are looking for #elif/#else/#endif */
+#define CPP_COND_GUARD      (1<<1) /* #ifdef ... #define was checked */
 
 /* flags for cpp_macro */
-#define CPP_MACRO_FUNC      1 /* this macro is function-like */
-#define CPP_MACRO_BUILTIN   2 /* this macro is builtin macros */
-#define CPP_MACRO_VA_ARG    4 /* this macro arg is variadic args */
-#define CPP_MACRO_GUARD     8 /* this macro is used as header guard */
-#define CPP_MACRO_DISABLED 16 /* this macro is currently expanding */
-
-/* limits for cpp_macro */
-#define CPP_MACRO_MAX       16384 /* per translation unit */
+#define CPP_MACRO_FUNC      (1<<0) /* this macro is function-like */
+#define CPP_MACRO_BUILTIN   (1<<1) /* this macro is builtin macros */
+#define CPP_MACRO_VA_ARG    (1<<2) /* this macro arg is variadic args */
+#define CPP_MACRO_GUARD     (1<<3) /* this macro is used as header guard */
+#define CPP_MACRO_DISABLED  (1<<4) /* macro-level disabling context */
 
 /* limits for cpp_context::buf */
 #define CPP_BUFFER_MAX     (1U << 24) /* 16MiB */
@@ -331,8 +327,6 @@ typedef struct cpp_stream {
  * `ts` is the token array after preprocessing a file, used by later phases.
  * `temp` is token array for backtrack.
  * `line` is token array for expanding macros in #if/#elif/#line/#include.
- *        unlike macro expansion in `es` and `argstream`, it's
- *        recycled.
  * `stream` is the file stream that's being preprocessed.
  * `es` is where all macros expanded in a translation unit.
  * `macro` is where all macros in a translation unit defined.
