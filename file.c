@@ -1,3 +1,5 @@
+/* vim: set expandtab ts=4 sw=4 tw=0 : */
+
 /*
  * file.c - implementation of cpp_file
  *
