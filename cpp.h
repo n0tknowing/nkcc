@@ -392,7 +392,6 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 const char *cpp_token_kind(uchar kind);
 uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, const cpp_token *tk);
-void cpp_token_unpp(const cpp_token *tk);
 uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
 
 static always_inline void cpp_token_array_setup(cpp_token_array *ts, uint max)
