@@ -24,6 +24,7 @@
  * - Too much assert() calls after allocation.
  * - Better memory allocation strategy for small structs such as expansion_stream,
  *   cond_stack, cpp_stream, cpp_macro_arg, etc.
+ * - Lack of discipline when modifying cpp_token::flags.
  *
  * Forever issues:
  * - Diagnostic.
