@@ -284,8 +284,8 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
     uint i, len;
     cpp_token *tk;
     uchar buf[1024];
-    uchar at_bof, at_bol, has_spc;
     const char *tk_kind, *p, *file;
+    uchar at_bof, at_bol, has_spc, no_exp;
 
     if (unlikely(ctx->ts.max == 0))
         cpp_error(ctx, NULL, "please call cpp_run first before calling "
@@ -296,6 +296,7 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
         at_bof = HAS_FLAG(tk->flags, CPP_TOKEN_BOF);
         at_bol = HAS_FLAG(tk->flags, CPP_TOKEN_BOL);
         has_spc = HAS_FLAG(tk->flags, CPP_TOKEN_SPACE);
+        no_exp = HAS_FLAG(tk->flags, CPP_TOKEN_NOEXPAND);
         tk_kind = cpp_token_kind(tk->kind);
         file = string_ref_ptr(cpp_file_no(tk->fileno)->name);
         len = tk->length;
@@ -305,10 +306,11 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
             len = cpp_token_splice(tk, buf, sizeof(buf));
             p = (const char *)buf;
         }
-        fprintf(fp, "[%c%c%c] %s, '%.*s', Loc=<%s:%u>\n",
-                     at_bof ? 'F' : 'f',
-                     at_bol ? 'L' : 'l',
-                     has_spc ? 'S' : 's',
+        fprintf(fp, "[%c%c%c%c] %s, '%.*s', Loc=<%s:%u>\n",
+                     at_bof ? 'F' : '.',
+                     at_bol ? 'L' : '.',
+                     has_spc ? 'S' : '.',
+                     no_exp ? 'M' : '.',
                      tk_kind,
                      len, p,
                      file, tk->lineno);
@@ -316,11 +318,9 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
 
     puts("\nToken flags:");
     puts("  'F' -- Beginning of file");
-    puts("  'f' -- Not beginning of file");
     puts("  'L' -- Beginning of line");
-    puts("  'l' -- Not beginning of line");
-    puts("  'S' -- Token followed by whitespace");
-    puts("  's' -- Token not followed by whitespace");
+    puts("  'S' -- Token preceded by whitespace");
+    puts("  'M' -- Macro expansion disabled");
     printf("Token count: %u\n", ctx->ts.n);
 }
 
