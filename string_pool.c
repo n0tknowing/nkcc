@@ -294,39 +294,6 @@ string_ref string_ref_new(const char *s)
     return string_ref_newlen(s, strlen(s));
 }
 
-string_ref string_ref_concat(string_ref r0, string_ref r1)
-{
-    string_ref str;
-    const char *ptr0, *ptr1;
-    char buf[8192] = {0}, *ptr;
-    unsigned int len, len0, len1;
-
-    err_if(r0 >= g_array.capacity, "dangling string_ref (is 0x%08u)", r0);
-    err_if(r1 >= g_array.capacity, "dangling string_ref (is 0x%08u)", r1);
-
-    len0 = g_array.data[r0].length;
-    ptr0 = g_buffer.data + g_array.data[r0].offset;
-
-    len1 = g_array.data[r1].length;
-    ptr1 = g_buffer.data + g_array.data[r1].offset;
-
-    len = len0 + len1;
-    if (len + 1 < sizeof(buf)) {
-        memcpy(buf, ptr0, len0);
-        memcpy(buf + len0, ptr1, len1);
-        str = string_ref_newlen(buf, len); // '\0' added here
-    } else {
-        ptr = calloc(1, len);
-        err_if(ptr == NULL, "unable to concat string_ref: %s", strerror(errno));
-        memcpy(ptr, ptr0, len0);
-        memcpy(ptr + len0, ptr1, len1);
-        str = string_ref_newlen(ptr, len); // '\0' added here
-        free(ptr);
-    }
-
-    return str;
-}
-
 const char *string_ref_ptr(string_ref r0)
 {
     err_if(r0 >= g_array.capacity, "0x%08u is not valid string_ref", r0);
