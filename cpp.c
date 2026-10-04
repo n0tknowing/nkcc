@@ -44,7 +44,7 @@ static void cond_stack_cleanup(cpp_context *ctx);
 static void macro_free(void *p);
 static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr);
 static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr);
-static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk);
+static uint get_lineno_tok(cpp_context *ctx, const cpp_token *tk);
 static void skip_line(cpp_context *ctx, cpp_token *tk);
 static void do_define(cpp_context *ctx, cpp_token *tk);
 static void do_undef(cpp_context *ctx, cpp_token *tk);
@@ -429,7 +429,7 @@ static void cpp_next_nonl(cpp_context *ctx, cpp_token *tk)
 
 /* ---- diagnostic -------------------------------------------------------- */
 
-void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
+void cpp_error(cpp_context *ctx, const cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
@@ -444,7 +444,7 @@ void cpp_error(cpp_context *ctx, cpp_token *tk, const char *s, ...)
     exit(1);
 }
 
-void cpp_warn(cpp_context *ctx, cpp_token *tk, const char *s, ...)
+void cpp_warn(cpp_context *ctx, const cpp_token *tk, const char *s, ...)
 {
     va_list ap;
     va_start(ap, s);
@@ -532,7 +532,7 @@ done:
                                                            len);
 }
 
-static uint get_lineno_tok(cpp_context *ctx, cpp_token *tk)
+static uint get_lineno_tok(cpp_context *ctx, const cpp_token *tk)
 {
     uint lineno, lndelta;
 
@@ -1822,7 +1822,7 @@ static cpp_macro_arg *macro_arg_new(cpp_macro_args *args, string_ref param)
     return arg;
 }
 
-static uchar find_param(string_ref *param, uint n_param, cpp_token *tk)
+static uchar find_param(const string_ref *param, uint n_param, const cpp_token *tk)
 {
     uint i;
     string_ref name;
@@ -1975,7 +1975,7 @@ static void parse_macro_arg(cpp_context *ctx, string_ref param,
     tk->kind = kind; tk->length = length;
 }
 
-static void collect_args(cpp_context *ctx, cpp_macro *m, cpp_token *tk,
+static void collect_args(cpp_context *ctx, const cpp_macro *m, cpp_token *tk,
                          cpp_macro_args *args)
 {
     string_ref *param = m->param;
@@ -2150,8 +2150,10 @@ static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr)
     return ctx->line.tokens;
 }
 
-static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
-                      cpp_token_array *_is)
+static void stringize(cpp_context *ctx,
+                      cpp_token_array *restrict os,
+                      const cpp_token *arg_tk,
+                      const cpp_token_array *restrict _is)
 {
     uint i, len;
     cpp_token tmp;
@@ -2194,8 +2196,9 @@ static void stringize(cpp_context *ctx, cpp_token_array *os, cpp_token *arg_tk,
     cpp_token_array_append(os, &tmp);
 }
 
-static void paste(cpp_context *ctx, cpp_token_array *os, cpp_token *rhs,
-                  cpp_token *macro_tk)
+static void paste(cpp_context *ctx, cpp_token_array *os,
+                  const cpp_token *restrict rhs,
+                  const cpp_token *restrict macro_tk)
 {
     int len, len2, n;
     cpp_stream stream; /* fake stream */
@@ -2256,7 +2259,7 @@ static void expand_arg(cpp_context *ctx, cpp_macro_arg *arg)
     expansion_stream_pop(ctx);
 }
 
-static cpp_macro_arg *find_arg_by_name(cpp_macro_args *args, string_ref name)
+static cpp_macro_arg *find_arg_by_name(const cpp_macro_args *args, string_ref name)
 {
     for (uint i = 0; i < args->n_arg; i++) {
         cpp_macro_arg *arg = &args->arglist[i];
@@ -2266,7 +2269,7 @@ static cpp_macro_arg *find_arg_by_name(cpp_macro_args *args, string_ref name)
     return NULL;
 }
 
-static cpp_macro_arg *find_arg(cpp_macro_args *args, cpp_token *tk)
+static cpp_macro_arg *find_arg(const cpp_macro_args *args, const cpp_token *tk)
 {
     if (tk->kind != TK_identifier || args == NULL || args->n_arg == 0)
         return NULL;
@@ -2274,11 +2277,11 @@ static cpp_macro_arg *find_arg(cpp_macro_args *args, cpp_token *tk)
     return find_arg_by_name(args, tk->p.ref);
 }
 
-static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
-                  cpp_macro_args *args, cpp_token_array *os)
+static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
+                  const cpp_macro_args *args, cpp_token_array *os)
 {
     cpp_token copy, eom;
-    cpp_token *is = m->body.tokens;
+    const cpp_token *is = m->body.tokens;
 
     while (is->kind != TK_eom) {
         if (is->kind == '#' && args != NULL) {
@@ -2289,9 +2292,9 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
 
         /* ## rhs */
         if (is->kind == TK_paste) {
-            cpp_macro_arg *arg = find_arg(args, ++is);
+            const cpp_macro_arg *arg = find_arg(args, ++is);
             if (arg != NULL) {
-                cpp_token *is2 = arg->body.tokens;
+                const cpp_token *is2 = arg->body.tokens;
                 if (is2->kind == TK_eoa)
                     ;
                 else if (os->n == 0)
@@ -2307,16 +2310,16 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
             continue;
         }
 
-        cpp_macro_arg *arg = find_arg(args, is);
+        const cpp_macro_arg *arg = find_arg(args, is);
 
         if (arg != NULL) { /* We found a parameter and its arguments */
             if (is[1].kind == TK_paste) {
                 /* Found lhs ## and suppress macro expansion */
-                cpp_token *rhs = is + 2;
+                const cpp_token *rhs = is + 2;
                 cpp_token *lhs = arg->body.tokens;
                 if (lhs->kind == TK_eoa) {
                     /* lhs is empty, we don't need to paste it */
-                    cpp_macro_arg *arg2 = find_arg(args, rhs);
+                    const cpp_macro_arg *arg2 = find_arg(args, rhs);
                     if (arg2 != NULL) {
                         lhs = arg2->body.tokens;
                         while (lhs->kind != TK_eoa)
@@ -2338,8 +2341,8 @@ static void subst(cpp_context *ctx, cpp_macro *m, cpp_token *macro_tk,
                 }
             } else {
                 uint j = 0;
-                cpp_token *param_tk = is++;
-                cpp_token *at = arg->expanded.tokens;
+                const cpp_token *param_tk = is++;
+                const cpp_token *at = arg->expanded.tokens;
                 while (j < arg->expanded.n) {
                     cpp_token_array_append(os, &at[j]);
                     j++;
@@ -2452,7 +2455,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
 {
     uint i;
-    cpp_token *tk1, *tk2;
     uchar type1 = HAS_FLAG(old_m->flags, CPP_MACRO_FUNC);
     uchar type2 = HAS_FLAG(new_m->flags, CPP_MACRO_FUNC);
 
@@ -2472,8 +2474,8 @@ static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
     }
 
     for (i = 0; i < old_m->body.n; i++) {
-        tk1 = &old_m->body.tokens[i];
-        tk2 = &new_m->body.tokens[i];
+        const cpp_token *tk1 = &old_m->body.tokens[i];
+        const cpp_token *tk2 = &new_m->body.tokens[i];
         if (tk1->kind != TK_eom && !cpp_token_equal(tk1, tk2))
             return 0;
     }
@@ -2483,7 +2485,6 @@ static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
 
 static void do_define(cpp_context *ctx, cpp_token *tk)
 {
-    cpp_file *file;
     uchar flags = 0;
     uint n_param = 0;
     cpp_token_array body;
@@ -2525,7 +2526,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         if (HAS_FLAG(old_m->flags, CPP_MACRO_GUARD)) {
             cpp_warn(ctx, tk, "'%s' already defined as header guard macro",
                               string_ref_ptr(name));
-            file = cpp_file_no(old_m->fileno);
+            const cpp_file *file = cpp_file_no(old_m->fileno);
             hash_table_remove(&ctx->guarded_file, file->path);
         } else {
             cpp_warn(ctx, tk, "'%s' redefined", string_ref_ptr(name));
