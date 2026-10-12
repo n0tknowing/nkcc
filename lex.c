@@ -22,6 +22,9 @@
 
 #include "cpp.h"
 
+#define tok_offset(p, base) ((uint)((p) - (base)))
+#define tok_length(p, strm) ((uint)((strm) - (p)))
+
 static always_inline void skip_line_continuation(cpp_stream *s, cpp_token *tk)
 {
     while (unlikely(*s->p == '\\' &&
@@ -96,8 +99,9 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
 
 void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
 {
+    const uchar *p = s->p;
     tk->lineno = s->lineno;
-    tk->p.ptr = s->p;
+    tk->p.src.offset = tok_offset(p, s->base);
 
     if (endq == '"' || endq == '\'')
         s->p++;
@@ -135,27 +139,28 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
         cpp_lex_error(s, "missing terminating %c character", endq);
     } else {
         s->p++;
-        tk->length = (uint)(s->p - tk->p.ptr);
+        tk->p.src.length = tok_length(p, s->p);
     }
 }
 
 static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 {
+    const uchar *p = s->p;
     uchar found_digraph = 0;
     tk->lineno = s->lineno;
-    tk->p.ptr = s->p;
+    tk->p.src.offset = tok_offset(p, s->base);
     tk->kind = *s->p;
     s->p++;
 
     /* one character, no need to handle line continuation */
     if (*s->p != '\\' && !ispunct(*s->p)) {
-        tk->length = 1;
+        tk->p.src.length = 1;
         return;
     }
 
     skip_line_continuation(s, tk);
 
-    switch (*(tk->p.ptr)) {
+    switch (*p) {
     case '+':
         if (*s->p == '+') tk->kind = TK_incr;
         else if (*s->p == '=') tk->kind = TK_asg_add;
@@ -181,7 +186,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             s->p++;
             skip_line_continuation(s, tk);
             if (*s->p == '%') {
-                const uchar *p = s->p++;
+                const uchar *q = s->p++;
                 skip_line_continuation(s, tk);
                 if (*s->p == ':') {
                     /* digraph %:%: become ## */
@@ -191,14 +196,14 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
                     /* can't find final ':', token becomes # (%:), put '%' back
                      * to the stream...
                      * may you burn in eternal hell if doing this */
-                    s->p = p;
+                    s->p = q;
                     tk->kind = '#';
                 }
             } else {
                 /* digraph %: become # */
                 tk->kind = '#';
             }
-            tk->length = (uint)(s->p - tk->p.ptr);
+            tk->p.src.length = tok_length(p, s->p);
             return;
         }
         break;
@@ -238,7 +243,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             } else {
                 tk->kind = TK_lshift;
             }
-            tk->length = (uint)(s->p - tk->p.ptr);
+            tk->p.src.length = tok_length(p, s->p);
             return;
         } else if (*s->p == '=') {
             tk->kind = TK_le;
@@ -260,7 +265,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
             } else {
                 tk->kind = TK_rshift;
             }
-            tk->length = (uint)(s->p - tk->p.ptr);
+            tk->p.src.length = tok_length(p, s->p);
             return;
         } else if (*s->p == '=') {
             tk->kind = TK_ge;
@@ -270,37 +275,37 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         if (*s->p == '.') {
             s->p++;
             skip_line_continuation(s, tk);
-            if (*s->p == '.') {
-                s->p++;
+            if (*s->p == '.')
                 tk->kind = TK_elipsis;
-                tk->length = (uint)(s->p - tk->p.ptr);
-            }
         }
+        /* in case fail to get complete ... it will enter the else branch
+         * in the code below */
         break;
     }
 
     if (tk->kind >= TK_elipsis || found_digraph) {
-        if (tk->kind != TK_elipsis) s->p++;
-        tk->length = (uint)(s->p - tk->p.ptr);
+        s->p++;
+        tk->p.src.length = tok_length(p, s->p);
     } else {
         /* restore line */
-        s->p = tk->p.ptr; s->lineno = tk->lineno; s->p++;
-        tk->length = 1; tk->kind = *(tk->p.ptr);
+        s->p = p; s->lineno = tk->lineno; s->p++;
+        tk->p.src.length = 1; tk->kind = *p;
+        tk->flags &= ~CPP_TOKEN_ESCNL; /* irrelevant for 1-byte char */
     }
 }
 
 static void cpp_lex_ident(cpp_stream *s, cpp_token *tk)
 {
-    const uchar *prev, *p2 = s->p;
+    const uchar *prev, *p = s->p;
 
     tk->lineno = s->lineno;
     s->p++;
 
-    while (*s->p != 0) {
+    while (*s->p) {
         prev = s->p;
         skip_line_continuation(s, tk);
         if (prev != s->p && g_lexbuf.len == 0)
-            cpp_buffer_append(&g_lexbuf, p2, (uint)(prev - p2));
+            cpp_buffer_append(&g_lexbuf, p, (uint)(prev - p));
         if (!(isalnum(*s->p) || *s->p == '_'))
             break;
         if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)))
@@ -311,14 +316,14 @@ static void cpp_lex_ident(cpp_stream *s, cpp_token *tk)
     if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)))
         tk->p.ref = string_ref_newlen((const char *)g_lexbuf.data, g_lexbuf.len);
     else
-        tk->p.ref = string_ref_newlen((const char *)p2, (uint)(s->p - p2));
-    tk->length = string_ref_len(tk->p.ref);
+        tk->p.ref = string_ref_newlen((const char *)p, (uint)(s->p - p));
     g_lexbuf.len = 0;
 }
 
 static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
 {
-    tk->p.ptr = s->p;
+    const uchar *p = s->p;
+    tk->p.src.offset = tok_offset(p, s->base);
     tk->lineno = s->lineno;
 
     while (*s->p) {
@@ -340,13 +345,11 @@ static void cpp_lex_number(cpp_stream *s, cpp_token *tk)
         }
     }
 
-    tk->length = (uint)(s->p - tk->p.ptr);
+    tk->p.src.length = tok_length(p, s->p);
 }
 
 void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 {
-    const uchar *p;
-
     if (unlikely(s == NULL))
         return;
 
@@ -360,8 +363,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
         /* comment */
         if (*s->p == '/') {
-            /* a complicated line continuation handling */
-            p = s->p++;
+            const uchar *p = s->p++;
             skip_line_continuation(s, NULL);
             if (*s->p == '/' || *s->p == '*') {
                 tk->flags |= CPP_TOKEN_SPACE;
@@ -377,8 +379,8 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         if (*s->p == '\n') {
             s->p++; tk->lineno = s->lineno++;
             s->flags = tk->flags | CPP_TOKEN_BOL;
-            s->flags &= ~CPP_TOKEN_SPACE;
-            tk->kind = '\n'; tk->length = 0;
+            s->flags &= ~CPP_TOKEN_SPACE; tk->kind = '\n';
+            tk->p.src.offset = 0; tk->p.src.length = 0;
             return;
         }
 
@@ -413,7 +415,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
         /* number or punctuator */
         if (*s->p == '.') {
-            p = s->p++;
+            const uchar *p = s->p++;
             skip_line_continuation(s, tk);
             if (isdigit(*s->p)) {
                 s->p = p;
@@ -439,6 +441,6 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
 
     tk->lineno = s->lineno;
     tk->kind = TK_eof;
-    tk->length = 0;
-    tk->p.ptr = s->p;
+    tk->p.src.offset = 0;
+    tk->p.src.length = 0;
 }

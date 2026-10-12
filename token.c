@@ -44,18 +44,17 @@ const char *cpp_token_kind(uchar kind)
         return "???";
 }
 
-uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
+uint cpp_token_spell(const cpp_token *tk, uchar *buf, uint bufsz)
 {
-    const uchar *p;
     uint i = 0, j = 0, len;
 
     if (tk->kind == TK_identifier) {
-        len = MIN(tk->length, bufsz);
+        len = MIN(string_ref_len(tk->p.ref), bufsz);
         memcpy(buf, (const uchar *)string_ref_ptr(tk->p.ref), len);
     } else {
-        p = tk->p.ptr;
+        const uchar *p = cpp_token_pointer(tk);
         if (HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL)) {
-            uint len2 = tk->length;
+            uint len2 = tk->p.src.length;
             while (i < len2 && j < bufsz) {
                 if (i + 2 <= len2 && p[i] == '\\' && p[i+1] == '\n')
                     i += 2;
@@ -66,7 +65,7 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
             }
             len = j;
         } else {
-            len = MIN(tk->length, bufsz);
+            len = MIN(tk->p.src.length, bufsz);
             memcpy(buf, p, len);
         }
     }
@@ -77,14 +76,13 @@ uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz)
 uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
 {
     uint len1, len2;
-    uchar spc1, spc2;
-    uchar buf1[1024], buf2[1024];
+    uchar buf1[4096], buf2[4096];
 
     if (tk1->kind != tk2->kind)
         return 0;
 
-    spc1 = HAS_FLAG(tk1->flags, CPP_TOKEN_SPACE);
-    spc2 = HAS_FLAG(tk2->flags, CPP_TOKEN_SPACE);
+    uchar spc1 = HAS_FLAG(tk1->flags, CPP_TOKEN_SPACE);
+    uchar spc2 = HAS_FLAG(tk2->flags, CPP_TOKEN_SPACE);
 
     if (spc1 != spc2)
         return 0;
@@ -97,8 +95,8 @@ uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
     case TK_string:
     case TK_char_const:
     case TK_number:
-        len1 = cpp_token_splice(tk1, buf1, sizeof(buf1));
-        len2 = cpp_token_splice(tk2, buf2, sizeof(buf2));
+        len1 = cpp_token_spell(tk1, buf1, sizeof(buf1));
+        len2 = cpp_token_spell(tk2, buf2, sizeof(buf2));
         if (len1 != len2 || memcmp(buf1, buf2, len1) != 0)
             return 0;
         break;
@@ -113,7 +111,7 @@ void cpp_token_print(FILE *fp, const cpp_token *tk)
 {
     uint len;
     const uchar *p;
-    uchar buf[1024];
+    uchar buf[4096];
 
     if (PREV_SPACE(tk))
         fwrite((const void *)" ", 1, 1, fp);
@@ -122,11 +120,11 @@ void cpp_token_print(FILE *fp, const cpp_token *tk)
         p = (const uchar *)string_ref_ptr(tk->p.ref);
         len = string_ref_len(tk->p.ref);
     } else if (unlikely(HAS_FLAG(tk->flags, CPP_TOKEN_ESCNL))) {
-        len = cpp_token_splice(tk, buf, sizeof(buf));
+        len = cpp_token_spell(tk, buf, sizeof(buf));
         p = buf;
     } else {
-        p = tk->p.ptr;
-        len = tk->length;
+        p = cpp_token_pointer(tk);
+        len = tk->p.src.length;
     }
 
     fwrite(p, 1, len, fp);

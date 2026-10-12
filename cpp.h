@@ -51,6 +51,7 @@
 #define HAS_FLAG(x, y) (((x) & (y)) == (y))
 #define AT_BOL(_t)     (HAS_FLAG((_t)->flags, CPP_TOKEN_BOL))
 #define PREV_SPACE(_t) (HAS_FLAG((_t)->flags, CPP_TOKEN_SPACE))
+#define IS_SYNTH(_t)   (HAS_FLAG((_t)->flags, CPP_TOKEN_SYNTH))
 #define LITREF(x)      string_ref_newlen((x), sizeof((x)) - 1)
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -88,6 +89,7 @@ typedef unsigned int tkchar;
 #define CPP_TOKEN_ESCNL     (1<<3) /* there is "\\\n" in the token */
 #define CPP_TOKEN_FLNUM     (1<<4) /* floating number constant */
 #define CPP_TOKEN_SPACE     (1<<5) /* preceded by whitespace */
+#define CPP_TOKEN_SYNTH     (1<<6) /* cpp_context::file0_buf */
 
 /* flags for cond_stack */
 #define CPP_COND_SKIP       (1<<0) /* we are looking for #elif/#else/#endif */
@@ -201,15 +203,19 @@ typedef struct {
 } cpp_file;
 
 typedef struct {
+    uint offset;
+    uint length;
+} cpp_token_span;
+
+typedef struct {
     uchar kind;
-    ushort flags;
+    uchar flags;
     ushort fileno;
     uint lineno;
-    uint length;
     union {
         string_ref ref; /* for TK_identifier */
         cpp_macro *macro; /* for TK_eom */
-        const uchar *ptr; /* for the rest */
+        cpp_token_span src; /* for the rest */
     } p;
 } cpp_token;
 
@@ -289,11 +295,6 @@ typedef struct expansion_stream {
     struct expansion_stream *prev; /* nested */
 } expansion_stream;
 
-typedef struct {
-    expansion_stream *head;
-    expansion_stream *tail;
-} expansion_stream_cache;
-
 /*
  * !!!!!!!!!! WARNING !!!!!!!!!!
  *
@@ -319,6 +320,7 @@ typedef struct cpp_stream {
     uint pplineno_val;
     const char *fname;
     const char *ppfname;
+    const uchar *base;
     const uchar *p;
     cpp_file *file;
     cond_stack *cond;
@@ -350,6 +352,7 @@ typedef struct {
     ht_t cached_file;
     ht_t guarded_file;
     cpp_buffer buf;
+    cpp_buffer file0_buf;
     const uchar *ppdate;
     const uchar *pptime;
     /* add more... */
@@ -392,9 +395,33 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 
 /* token.c */
 const char *cpp_token_kind(uchar kind);
-uint cpp_token_splice(const cpp_token *tk, uchar *buf, uint bufsz);
+uint cpp_token_spell(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, const cpp_token *tk);
 uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
+
+#define IS_I(_t) (_t->kind == TK_identifier)
+static always_inline uint cpp_token_length(const cpp_token *tk)
+{
+# define TK_LEN1 string_ref_len(tk->p.ref)
+# define TK_LEN2 tk->p.src.length
+    return IS_I(tk) ? TK_LEN1 : TK_LEN2;
+# undef TK_LEN2
+# undef TK_LEN1
+}
+
+static always_inline const uchar *cpp_token_pointer(const cpp_token *tk)
+{
+# define TK_PTR1 (const uchar *)string_ref_ptr(tk->p.ref)
+# define TK_PTR2 cpp_file_no(tk->fileno)->data + tk->p.src.offset
+# define TK_PTR3 cpp_file_no(0)->data + tk->p.src.offset
+    if (!IS_SYNTH(tk))
+        return IS_I(tk) ? TK_PTR1 : TK_PTR2;
+    return TK_PTR3;
+# undef TK_PTR3
+# undef TK_PTR2
+# undef TK_PTR1
+}
+#undef IS_I
 
 static always_inline void cpp_token_array_setup(cpp_token_array *ts, uint max)
 {
