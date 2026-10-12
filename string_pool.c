@@ -138,16 +138,13 @@ static void __buffer_cleanup(void)
         munmap(g_buffer.data, g_buffer.capacity);
 }
 
-static string_ref __buffer_new(const char *str, unsigned int __size)
+static string_ref __buffer_new(const char *str, uint32_t __size)
 {
-    char *buffer;
     string_ref id = 0;
-    unsigned int prev_size, size, capacity;
-
-    buffer = g_buffer.data;
-    prev_size = g_buffer.count;
-    capacity = g_buffer.capacity;
-    size = prev_size + __size + 1;
+    char *buffer = g_buffer.data;
+    uint32_t prev_size = g_buffer.count;
+    uint32_t capacity = g_buffer.capacity;
+    uint32_t size = prev_size + __size + 1;
 
     err_if(size >= capacity, "string pool exhausted (%u)", capacity);
     memcpy(buffer + prev_size, str, __size);
@@ -170,17 +167,17 @@ static string_ref __buffer_new(const char *str, unsigned int __size)
     return id;
 }
 
-static uint64_t __do_hash(const char *data, unsigned int len)
+static uint64_t __do_hash(const char *data, uint32_t len)
 {
     return XXH3_64bits(data, len);
 }
 
-static string_ref __lookup(const char *s0, uint64_t hash, unsigned int len)
+static string_ref __lookup(const char *s0, uint64_t hash, uint32_t len)
 {
     string_ref s, *strings = g_pool.data;
-    unsigned int idx, mask = g_pool.capacity - 1;
+    uint32_t mask = g_pool.capacity - 1;
+    uint32_t idx = hash & mask;
 
-    idx = hash & mask;
     while ((s = strings[idx]) != 0) {
         struct string_off *so = &g_array.data[s];
         const char *s1 = g_buffer.data + so->offset;
@@ -194,25 +191,22 @@ static string_ref __lookup(const char *s0, uint64_t hash, unsigned int len)
 
 static void __try_resize(void)
 {
-    string_ref *new_pool, *old_pool;
-    unsigned int new_capacity, old_capacity, i, idx, mask;
-
     if (likely(g_pool.count < g_pool.load_factor))
         return;
 
-    new_capacity = g_pool.capacity * 2;
-    mask = new_capacity - 1;
-    new_pool = calloc(new_capacity, sizeof(string_ref));
+    uint32_t new_capacity = g_pool.capacity * 2;
+    uint32_t mask = new_capacity - 1;
+    string_ref *new_pool = calloc(new_capacity, sizeof(string_ref));
     err_if(new_pool == NULL, "unable to allocate string pool: %s",
            strerror(errno));
 
-    old_pool = g_pool.data;
-    old_capacity = g_pool.capacity;
+    string_ref *old_pool = g_pool.data;
+    uint32_t old_capacity = g_pool.capacity;
 
-    for (i = 0; i < old_capacity; i++) {
+    for (uint32_t i = 0; i < old_capacity; i++) {
         string_ref s = old_pool[i];
         if (s != 0) {
-            idx = g_array.data[s].hash & mask;
+            uint32_t idx = g_array.data[s].hash & mask;
             while (new_pool[idx] != 0)
                 idx = (idx + 1) & mask;
             new_pool[idx] = s;
@@ -222,7 +216,7 @@ static void __try_resize(void)
     free(old_pool);
     g_pool.data = new_pool;
     g_pool.capacity = new_capacity;
-    g_pool.load_factor = (unsigned int)((double)new_capacity * 0.80);
+    g_pool.load_factor = (uint32_t)((double)new_capacity * 0.80);
 }
 
 void string_pool_setup(void)
@@ -233,7 +227,7 @@ void string_pool_setup(void)
     err_if(g_pool.data == NULL, "unable to allocate string pool: %s",
            strerror(errno));
     g_pool.capacity = DEFAULT_POOL_CAPA;
-    g_pool.load_factor = (unsigned int)((double)(DEFAULT_POOL_CAPA * 0.80));
+    g_pool.load_factor = (uint32_t)((double)(DEFAULT_POOL_CAPA * 0.80));
 
     g_array.data = calloc(DEFAULT_ARRAY_CAPA, sizeof(struct string_off));
     err_if(g_array.data == NULL, "unable to allocate string pool: %s",
@@ -258,27 +252,23 @@ uint32_t string_pool_count(void)
     return g_pool.count;
 }
 
-string_ref string_ref_newlen(const char *s, unsigned int len)
+string_ref string_ref_newlen(const char *s, uint32_t len)
 {
-    uint64_t hash;
-    string_ref str;
-    uint32_t idx, mask;
-
     if (unlikely(g_pool.data == NULL))
         string_pool_setup();
 
     if (len == 0)
         return 0;
 
-    hash = __do_hash(s, len);
-    str = __lookup(s, hash, len);
+    uint64_t hash = __do_hash(s, len);
+    string_ref str = __lookup(s, hash, len);
     if (str != 0)
         return str;
 
     __try_resize();
 
-    mask = g_pool.capacity - 1;
-    idx = hash & mask;
+    uint32_t mask = g_pool.capacity - 1;
+    uint32_t idx = hash & mask;
 
     while (g_pool.data[idx] != 0)
         idx = (idx + 1) & mask;
@@ -287,7 +277,6 @@ string_ref string_ref_newlen(const char *s, unsigned int len)
     g_array.data[str].hash = hash;
     g_pool.data[idx] = str;
     g_pool.count++;
-
     return str;
 }
 
