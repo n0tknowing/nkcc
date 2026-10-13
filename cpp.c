@@ -75,8 +75,11 @@ static string_ref g__VA_ARGS__,
                   g__COUNTER__,
                   g_defined;
 
+/* fake stream used in -D, -U, stringize(), and paste() mustn't
+ * update g_include_depth */
+static uint g_include_depth;
+static cpp_stream g_stream_tmp; /* fake stream for -D and -U */
 static uint g_counter;
-static cpp_stream g_stream_tmp;
 static char *g_include_search_path[CPP_SEARCHPATH_MAX];
 static int g_include_search_path_count;
 static cond_expr g_cond_expr[CPP_CONDEXPR_MAX];
@@ -527,6 +530,7 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
 {
     cpp_stream *s = malloc(sizeof(cpp_stream));
     assert(s);
+
     s->flags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
     s->pplineno_loc = s->pplineno_val = 0;
     s->lineno = 1;
@@ -537,14 +541,18 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     s->cond = NULL;
     s->prev = ctx->stream;
     ctx->stream = s;
+
+    g_include_depth++;
 }
 
 static void cpp_stream_pop(cpp_context *ctx)
 {
     if (ctx->stream != NULL) {
         cpp_stream *prev = ctx->stream->prev;
-        if (ctx->stream != &g_stream_tmp)
+        if (ctx->stream != &g_stream_tmp) {
             free(ctx->stream);
+            g_include_depth--;
+        }
         ctx->stream = prev;
     }
 }
@@ -703,6 +711,10 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
             return;
     }
 
+    if (g_include_depth >= CPP_MAX_INCLUDE)
+        cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
+                                "of %u", g_include_depth, CPP_MAX_INCLUDE);
+
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
         nameref = string_ref_new(name);
@@ -710,6 +722,9 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
         if (file == NULL)
             cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
                       strerror(errno));
+        /* cache right away, not at EOF: a file that includes itself never
+         * reaches EOF and every level would otherwise re-read it */
+        hash_table_insert(&ctx->cached_file, pathref, file);
     }
 
     cpp_stream_push(ctx, file);
@@ -2574,13 +2589,6 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             if (ctx->stream->cond != NULL) {
                 const cpp_token tok = ctx->stream->cond->token;
                 cpp_error(ctx, &tok, "unterminated %s", cond_stack_name(ctx));
-            }
-            cpp_file *file = ctx->stream->file;
-            string_ref pathref = file->path;
-            if (!hash_table_lookup(&ctx->guarded_file, pathref)) {
-                /* cache the file, no more cpp_file_open2() if the file
-                 * is #included multiple times */
-                hash_table_insert(&ctx->cached_file, pathref, file);
             }
             cpp_stream_pop(ctx);
             if (ctx->stream == NULL)

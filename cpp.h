@@ -108,6 +108,9 @@ typedef unsigned int tkchar;
 /* limits for include search path */
 #define CPP_SEARCHPATH_MAX  128
 
+/* limits for #include nesting (main file counts as depth 1) */
+#define CPP_MAX_INCLUDE     128
+
 /* limits for cond_expr */
 #define CPP_CONDEXPR_MAX    1024
 
