@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99 -Wall -Wextra -Wvla -Wstrict-prototypes -Wno-switch -fwrapv
+CFLAGS=-std=c99 -Wall -Wextra -Wvla -Wstrict-aliasing -Wstrict-prototypes -Wno-switch -fwrapv
 
 BUILDDIR=build
 SRCS=buffer.c file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
