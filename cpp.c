@@ -610,8 +610,9 @@ done:
     return pathref;
 }
 
-static const char *do_include2(cpp_context *ctx, cpp_token *tk, uchar *buf,
-                               const char **cwd, uint *outlen, uchar *is_sys)
+static const char *
+resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
+                         const char **cwd, uint *outlen, uchar *is_sys)
 {
     uint len = 0;
     const char *path = (const char *)buf;
@@ -674,7 +675,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     } else {
         if (tk->kind != TK_identifier)
             goto include_error;
-        name = do_include2(ctx, tk, buf, &cwd, &len, &is_sys);
+        name = resolve_computed_include(ctx, tk, buf, &cwd, &len, &is_sys);
         if (name == NULL)
             goto include_error;
     }
