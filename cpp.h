@@ -93,7 +93,7 @@ typedef unsigned int tkchar;
 
 /* flags for cond_stack */
 #define CPP_COND_SKIP       (1<<0) /* we are looking for #elif/#else/#endif */
-#define CPP_COND_GUARD      (1<<1) /* #ifdef ... #define was checked */
+#define CPP_COND_GUARD      (1<<1) /* #ifndef ... #define was checked */
 
 /* flags for cpp_macro */
 #define CPP_MACRO_FUNC      (1<<0) /* this macro is function-like */
