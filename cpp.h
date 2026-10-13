@@ -342,7 +342,6 @@ typedef struct cpp_stream {
  * `pptime` is the cached value of __TIME__ macro.
  */
 typedef struct {
-    uchar flags;
     cpp_token_array ts;
     cpp_token_array pending;
     cpp_token_array line;
@@ -355,6 +354,7 @@ typedef struct {
     cpp_buffer file0_buf;
     const uchar *ppdate;
     const uchar *pptime;
+    uchar flags;
     /* add more... */
 } cpp_context;
 
