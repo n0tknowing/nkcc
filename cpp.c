@@ -2095,7 +2095,6 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
 
 static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 {
-    uchar kind;
     cpp_token_array_clear(&ctx->line);
 
     while (1) {
@@ -2108,7 +2107,7 @@ static cpp_token *expand_line(cpp_context *ctx, cpp_token *tk, uchar is_expr)
         cpp_next(ctx, tk);
     }
 
-    kind = tk->kind;
+    uchar kind = tk->kind;
     tk->kind = TK_eof;
     cpp_token_array_append(&ctx->line, tk);
     tk->kind = kind;
@@ -2121,10 +2120,8 @@ static void stringize(cpp_context *ctx,
                       const cpp_token *arg_tk,
                       const cpp_token_array *restrict _is)
 {
-    cpp_token tmp;
     uchar buf[4096];
     uchar first = 1;
-    cpp_stream stream; /* fake stream */
     const cpp_token *is = _is->tokens;
     const uchar *p = cpp_buffer_append_ch(&ctx->file0_buf, '"');
 
@@ -2146,6 +2143,7 @@ static void stringize(cpp_context *ctx,
 
     cpp_buffer_append_ch(&ctx->file0_buf, '"');
 
+    cpp_stream stream; /* fake stream */
     stream.flags = arg_tk->flags & CPP_TOKEN_SPACE;
     stream.flags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
@@ -2159,6 +2157,7 @@ static void stringize(cpp_context *ctx,
     stream.cond = NULL;
     stream.prev = NULL;
 
+    cpp_token tmp;
     cpp_lex_scan(&stream, &tmp);
     cpp_token_array_append(os, &tmp);
 }
@@ -2167,17 +2166,15 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
                   const cpp_token *restrict rhs,
                   const cpp_token *restrict macro_tk)
 {
-    int len, len2, n;
-    cpp_stream stream; /* fake stream */
-    cpp_token tmp, *lhs;
-    char buf[4096], buf2[4096], buf3[8192 + 1] = {0};
     uint mark = ctx->file0_buf.len;
+    char buf[4096], buf2[4096], buf3[8192 + 1] = {0};
 
-    lhs = &os->tokens[os->n - 1];
-    len = (int)cpp_token_spell(lhs, (uchar *)buf, sizeof(buf));
-    len2 = (int)cpp_token_spell(rhs, (uchar *)buf2, sizeof(buf2));
-    n = snprintf(buf3, sizeof(buf3) - 1, "%.*s%.*s", len, buf, len2, buf2);
+    cpp_token *lhs = &os->tokens[os->n - 1];
+    int len = (int)cpp_token_spell(lhs, (uchar *)buf, sizeof(buf));
+    int len2 = (int)cpp_token_spell(rhs, (uchar *)buf2, sizeof(buf2));
+    int n = snprintf(buf3, sizeof(buf3) - 1, "%.*s%.*s", len, buf, len2, buf2);
 
+    cpp_stream stream; /* fake stream */
     stream.flags = lhs->flags & CPP_TOKEN_SPACE;
     stream.flags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
@@ -2191,7 +2188,9 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     stream.cond = NULL;
     stream.prev = NULL;
 
+    cpp_token tmp;
     cpp_lex_scan(&stream, &tmp);
+
     if (tmp.kind == TK_eof) {
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
     } else if (tmp.kind == TK_identifier) {
@@ -2250,7 +2249,6 @@ static cpp_macro_arg *find_arg(const cpp_macro_args *args, const cpp_token *tk)
 static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
                   const cpp_macro_args *args, cpp_token_array *os)
 {
-    cpp_token eom;
     const cpp_token *is = m->body.tokens;
 
     while (is->kind != TK_eom) {
@@ -2339,7 +2337,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
     if (is->kind != TK_eom)
         cpp_error(ctx, macro_tk, "internal error (subst())");
 
-    eom = *is;
+    cpp_token eom = *is;
     eom.p.macro = m;
     cpp_token_array_append(os, &eom); /* TK_eom */
 }
@@ -2452,35 +2450,35 @@ static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
 
 static void do_define(cpp_context *ctx, cpp_token *tk)
 {
-    uchar flags = 0;
-    uint n_param = 0;
-    cpp_token_array body;
-    cpp_macro *m, *old_m, tmp;
-    string_ref name, *param = NULL;
+    cpp_next(ctx, tk); /* eat 'define' */
 
-    cpp_next(ctx, tk);
     if (tk->kind != TK_identifier)
         cpp_error(ctx, tk, "no macro name given in #define");
 
-    name = tk->p.ref;
+    string_ref name = tk->p.ref;
     if (name == g_defined)
         cpp_error(ctx, tk, "'defined' cannot be used as a macro name");
     else if (name == g__VA_ARGS__)
         cpp_warn(ctx, tk, "__VA_ARGS__ used as a macro name has no effect");
 
-    old_m = hash_table_lookup(&ctx->macro, name);
+    cpp_macro *old_m = hash_table_lookup(&ctx->macro, name);
     cpp_next(ctx, tk);
 
+    uchar flags = 0;
+    uint n_param = 0;
+    string_ref *param = NULL;
     if (tk->kind == '(' && !PREV_SPACE(tk)) {
         n_param = parse_macro_param(ctx, tk, &param);
         flags = CPP_MACRO_FUNC;
     }
 
+    cpp_token_array body;
     parse_macro_body(ctx, tk, &body, param, n_param, flags);
     body.tokens[0].flags &= ~CPP_TOKEN_SPACE;
 
     if (unlikely(old_m != NULL)) {
         /* slow... */
+        cpp_macro tmp;
         tmp.flags = flags;
         tmp.body = body;
         tmp.param = param;
@@ -2509,7 +2507,7 @@ static void do_define(cpp_context *ctx, cpp_token *tk)
         cpp_token_array_cleanup(&old_m->body);
         old_m->body = body;
     } else {
-        m = macro_new(name, flags, ctx->stream->file->no, body);
+        cpp_macro *m = macro_new(name, flags, ctx->stream->file->no, body);
         if (HAS_FLAG(flags, CPP_MACRO_FUNC)) {
             m->param = param;
             m->n_param = n_param;
