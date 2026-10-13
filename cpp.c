@@ -373,13 +373,10 @@ static always_inline void cpp_token_set_synth(cpp_context *ctx,
  * Can read token from the result of a macro expansion. */
 static void cpp_next(cpp_context *ctx, cpp_token *tk)
 {
-    cpp_macro *m;
-
     /* Backtrack */
     if (unlikely(ctx->pending.n != 0)) {
-        uint i;
         *tk = ctx->pending.tokens[0];
-        for (i = 1; i < ctx->pending.n; i++)
+        for (uint i = 1; i < ctx->pending.n; i++)
             ctx->pending.tokens[i - 1] = ctx->pending.tokens[i];
         ctx->pending.n--;
         return;
@@ -388,7 +385,7 @@ static void cpp_next(cpp_context *ctx, cpp_token *tk)
     while (ctx->es != NULL) {
         const cpp_token *t = ctx->es->p;
         if (t->kind == TK_eom) {
-            m = t->p.macro;
+            cpp_macro *m = t->p.macro;
             m->flags &= ~CPP_MACRO_DISABLED;
             expansion_stream_pop(ctx);
             continue;
@@ -2425,7 +2422,6 @@ static uchar expand(cpp_context *ctx, cpp_token *tk, uchar is_expr)
 
 static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
 {
-    uint i;
     uchar type1 = HAS_FLAG(old_m->flags, CPP_MACRO_FUNC);
     uchar type2 = HAS_FLAG(new_m->flags, CPP_MACRO_FUNC);
 
@@ -2438,13 +2434,13 @@ static uchar macro_equal(cpp_macro *old_m, cpp_macro *new_m)
     if (type1 == CPP_MACRO_FUNC) {
         if (old_m->n_param != new_m->n_param)
             return 0;
-        for (i = 0; i < old_m->n_param; i++) {
+        for (uint i = 0; i < old_m->n_param; i++) {
             if (old_m->param[i] != new_m->param[i])
                 return 0;
         }
     }
 
-    for (i = 0; i < old_m->body.n; i++) {
+    for (uint i = 0; i < old_m->body.n; i++) {
         const cpp_token *tk1 = &old_m->body.tokens[i];
         const cpp_token *tk2 = &new_m->body.tokens[i];
         if (tk1->kind != TK_eom && !cpp_token_equal(tk1, tk2))
