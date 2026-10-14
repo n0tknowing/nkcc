@@ -1,0 +1,40 @@
+#define E1(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define E2(...) f(a, ##__VA_ARGS__)
+#define E4(fmt, ...) p(fmt, ##__VA_ARGS__, end)
+#define S(fmt, ...) f(#fmt, ##__VA_ARGS__)
+#define M 7
+#define W(x, ...) x ## _t , ## __VA_ARGS__
+#define E1(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define E0(...) , ##__VA_ARGS__
+#define T(a, b, ...) a, b, ##__VA_ARGS__ ;
+#define TWO(...) x , ##__VA_ARGS__ , ##__VA_ARGS__ y
+#define LEAD(a, ...) a ## b , ## __VA_ARGS__
+
+1: E1("a")
+2: E1("a", 1)
+3: E1("a", 1, 2)
+4: E1("a",)
+5: E1("a", )
+6: E2()
+7: E2(1)
+8: E2(1, 2)
+9: E2( )
+10: E4("a")
+11: E4("a", 1)
+12: E1("x", M)
+13: E1("a", E1("b"))
+14: E1(E1("a"), 2)
+15: S(hello)
+16: S(hello, M, M)
+17: W(k)
+18: W(k, 1, 2)
+19: E1("a", (1, 2), [3])
+20: E1()
+21: T(1, 2)
+22: T(1, 2, 3)
+23: E0()
+24: E0(7)
+25: TWO()
+26: TWO(1)
+27: LEAD(x)
+28: LEAD(x, 5)

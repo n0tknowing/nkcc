@@ -36,3 +36,11 @@ For now, only the C preprocessor is implemented.
 - `__BASE_FILE__`
 - `__TIMESTAMP__`
 - `__COUNTER__` (per C11 but apparently it becomes standard feature in C2y)
+
+### GNU `, ## __VA_ARGS__`
+
+```c
+#define dbg(fmt, ...) printf(fmt, ## __VA_ARGS__)
+dbg("hello\n"); // expanded to printf("hello\n");
+dbg("hello %s\n", "world"); // expanded to printf("hello %s\n", world);
+```

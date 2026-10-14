@@ -95,12 +95,14 @@ typedef unsigned int tkchar;
 #define CPP_COND_SKIP       (1<<0) /* we are looking for #elif/#else/#endif */
 #define CPP_COND_GUARD      (1<<1) /* #ifndef ... #define was checked */
 
-/* flags for cpp_macro */
-#define CPP_MACRO_FUNC      (1<<0) /* this macro is function-like */
-#define CPP_MACRO_BUILTIN   (1<<1) /* this macro is builtin macros */
-#define CPP_MACRO_VA_ARG    (1<<2) /* this macro arg is variadic args */
-#define CPP_MACRO_GUARD     (1<<3) /* this macro is used as header guard */
-#define CPP_MACRO_DISABLED  (1<<4) /* macro-level disabling context */
+/* flags for cpp_macro and cpp_macro_arg */
+#define CPP_MACRO_FUNC      (1<<0) /* cpp_macro is function-like */
+#define CPP_MACRO_BUILTIN   (1<<1) /* cpp_macro is builtin macros */
+#define CPP_MACRO_VA_ARG    (1<<2) /* cpp_macro_arg is variadic arg */
+#define CPP_MACRO_GUARD     (1<<3) /* cpp_macro is used as header guard */
+#define CPP_MACRO_DISABLED  (1<<4) /* cpp_macro is currently expanding */
+#define CPP_MACRO_VA_OMIT   (1<<5) /* cpp_macro_arg is variadic arg and may
+                                      be omitted (GNU extension) */
 
 /* limits for cpp_context::buf */
 #define CPP_BUFFER_MAX     (1U << 24) /* 16MiB */

@@ -1979,6 +1979,7 @@ static void collect_args(cpp_context *ctx, const cpp_macro *m, cpp_token *tk,
 
     if (empty_va_arg) {
         cpp_macro_arg *arg = macro_arg_new(args, g__VA_ARGS__);
+        arg->flags |= CPP_MACRO_VA_OMIT;
 
         tk->kind = TK_eoa;
         tk->p.src.length = 0;
@@ -2274,11 +2275,40 @@ static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
             continue;
         }
 
+        /*
+         * Handle GNU ,##__VA_ARGS__ with two conditions:
+         * 1. if __VA_ARGS__ is empty, ',' and '##' are skipped
+         *    (i.e. not inserted into 'os'), otherwise
+         * 2. insert both ',' and '__VA_ARGS__'-associated tokens into 'os'
+         */
+        if (is->kind == ',' && is[1].kind == TK_paste) {
+            /*
+             * 'is + 2' is completely safe here.
+             * We always land on a valid replacement list token, so checking
+             * for buffer over-read is completely redundant.
+             * This is possible because the placement of ## is checked at
+             * definition time (i.e. at #define, see parse_macro_body()).
+             */
+            const cpp_macro_arg *arg = find_arg(args, is + 2);
+            if (arg != NULL && HAS_FLAG(arg->flags, CPP_MACRO_VA_ARG)) {
+                const cpp_token *is2 = arg->body.tokens; /* raw tokens */
+                uchar maybe_omit = HAS_FLAG(arg->flags, CPP_MACRO_VA_OMIT) ||
+                                   (m->n_param == 1 && is2->kind == TK_eoa);
+                if (!maybe_omit) {
+                    cpp_token_array_append(os, is); /* insert ',' */
+                    while (is2->kind != TK_eoa)
+                        cpp_token_array_append(os, is2++);
+                }
+                is += 3; /* eat ',' and '##' and '__VA_ARGS__' */
+                continue;
+            }
+        }
+
         /* ## rhs */
         if (is->kind == TK_paste) {
             const cpp_macro_arg *arg = find_arg(args, ++is);
             if (arg != NULL) {
-                const cpp_token *is2 = arg->body.tokens;
+                const cpp_token *is2 = arg->body.tokens; /* raw tokens */
                 if (is2->kind == TK_eoa)
                     ;
                 else if (os->n == 0)
@@ -2300,7 +2330,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
             if (is[1].kind == TK_paste) {
                 /* Found lhs ## and suppress macro expansion */
                 const cpp_token *rhs = is + 2;
-                cpp_token *lhs = arg->body.tokens;
+                cpp_token *lhs = arg->body.tokens; /* raw tokens */
                 if (lhs->kind == TK_eoa) {
                     /* lhs is empty, we don't need to paste it */
                     const cpp_macro_arg *arg2 = find_arg(args, rhs);
@@ -2324,6 +2354,7 @@ static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
                     is++; /* handle ## in the next iteration */
                 }
             } else {
+                /* normal-context: use pre-expanded tokens */
                 uint j = 0;
                 const cpp_token *param_tk = is++;
                 const cpp_token *at = arg->expanded.tokens;
