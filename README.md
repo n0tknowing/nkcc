@@ -44,3 +44,7 @@ For now, only the C preprocessor is implemented.
 dbg("hello\n"); // expanded to printf("hello\n");
 dbg("hello %s\n", "world"); // expanded to printf("hello %s\n", world);
 ```
+
+### Preprocessor directive #warning
+
+Although it become part of the language since C23
