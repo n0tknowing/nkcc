@@ -133,9 +133,9 @@ void cpp_context_setup(cpp_context *ctx)
 
     cpp_file_no(0)->data = ctx->file0_buf.data;
 
-    cpp_search_path_append(ctx, "/usr/include");
     cpp_search_path_append(ctx, "/usr/local/include");
     cpp_search_path_append(ctx, "/usr/include/x86_64-linux-gnu");
+    cpp_search_path_append(ctx, "/usr/include");
 
     hash_table_setup(&ctx->cached_file, 64);
     hash_table_setup(&ctx->guarded_file, 32);
@@ -312,7 +312,7 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
         cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(p), len2);
     } else { /* append " 1" */
         sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), len1);
-        cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("1"), 2);
+        cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(" 1"), 2);
     }
 
     cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
