@@ -529,10 +529,10 @@ static void do_line(cpp_context *ctx, cpp_token *tk)
     if (tok->kind != TK_eof)
         cpp_error(ctx, tok, "stray token after #line");
 
+    ctx->stream->ppfname = to_char_cp(cpp_buffer_append(&ctx->file0_buf, fname, len));
 done:
     ctx->stream->pplineno_loc = tok->lineno;
     ctx->stream->pplineno_val = val;
-    ctx->stream->ppfname = to_char_cp(cpp_buffer_append(&ctx->file0_buf, fname, len));
 }
 
 static uint get_lineno_tok(cpp_context *ctx, const cpp_token *tk)
