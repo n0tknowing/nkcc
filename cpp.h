@@ -64,6 +64,10 @@
 # define always_inline  inline
 #endif
 
+#define to_uchar_p(x) ((uchar *)(x))
+#define to_uchar_cp(x) ((const uchar *)(x))
+#define to_char_p(x) ((char *)(x))
+#define to_char_cp(x) ((const char *)(x))
 
 /* ---- typedefs ----------------------------------------------------------- */
 

@@ -63,7 +63,8 @@ static string_ref g_if,
                   g_undef,
                   g_line,
                   g_pragma,
-                  g_error;
+                  g_error,
+                  g_warning;
 
 static string_ref g__VA_ARGS__,
                   g__FILE__,
@@ -113,6 +114,7 @@ void cpp_context_setup(cpp_context *ctx)
     g_line = LITREF("line");
     g_pragma = LITREF("pragma");
     g_error = LITREF("error");
+    g_warning = LITREF("warning");
 
     g__VA_ARGS__ = LITREF("__VA_ARGS__");
     g__FILE__ = LITREF("__FILE__");
@@ -272,7 +274,7 @@ void cpp_dump_token(cpp_context *ctx, FILE *fp)
             p = string_ref_ptr(tk->p.ref);
         } else {
             len = cpp_token_spell(tk, buf, sizeof(buf));
-            p = (const char *)buf;
+            p = to_char_cp(buf);
         }
         fprintf(fp, "[%c%c%c%c] %s, '%.*s', Loc=<%s:%u>\n",
                      at_bof ? 'F' : '.',
@@ -304,16 +306,16 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
     p = memchr(in, '=', len1);
     if (p != NULL) { /* replace the first '=' to a single whitespace */
         len2 = (uint)(p - in);
-        sp = cpp_buffer_append(&ctx->file0_buf, (const uchar *)in, len2);
+        sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), len2);
         cpp_buffer_append_ch(&ctx->file0_buf, ' ');
         p++; len2 = (uint)(in + len1 - p);
-        cpp_buffer_append(&ctx->file0_buf, (const uchar *)p, len2);
+        cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(p), len2);
     } else { /* append " 1" */
-        sp = cpp_buffer_append(&ctx->file0_buf, (const uchar *)in, len1);
-        cpp_buffer_append(&ctx->file0_buf, (const uchar *)" 1", 2);
+        sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), len1);
+        cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("1"), 2);
     }
 
-    cpp_buffer_append(&ctx->file0_buf, (const uchar *)"\n\0", 2);
+    cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
     g_stream_tmp.flags = 0;
     g_stream_tmp.lineno = 1;
@@ -336,8 +338,8 @@ void cpp_macro_undefine(cpp_context *ctx, const char *in)
     const uchar *sp;
     cpp_file *f = cpp_file_no(0);
 
-    sp = cpp_buffer_append(&ctx->file0_buf, (const uchar *)in, strlen(in));
-    cpp_buffer_append(&ctx->file0_buf, (const uchar *)"\n\0", 2);
+    sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), strlen(in));
+    cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
     g_stream_tmp.flags = 0;
     g_stream_tmp.lineno = 1;
@@ -440,24 +442,44 @@ void cpp_warn(cpp_context *ctx, const cpp_token *tk, const char *s, ...)
 
 static void do_error(cpp_context *ctx, cpp_token *tk)
 {
-    uint len;
-    const uchar *msg;
-    uchar buf[1024] = {0};
+    uchar buf[4096] = {0};
     cpp_token error_tk = *tk;
+    const uchar *msg = cpp_buffer_append(&ctx->buf, to_uchar_cp("#error"), 6);
 
-    msg = cpp_buffer_append(&ctx->buf, (const uchar *)"#error", 6);
-    cpp_next(ctx, tk);
+    cpp_next(ctx, tk); /* eat "error" */
 
     while (tk->kind != '\n' && tk->kind != TK_eof) {
         if (PREV_SPACE(tk))
             cpp_buffer_append_ch(&ctx->buf, ' ');
-        len = cpp_token_spell(tk, buf, sizeof(buf));
+        uint len = cpp_token_spell(tk, buf, sizeof(buf));
         cpp_buffer_append(&ctx->buf, buf, len);
         cpp_next(ctx, tk);
     }
 
     cpp_buffer_append_ch(&ctx->buf, '\0');
-    cpp_error(ctx, &error_tk, "%s", (const char *)msg);
+    cpp_error(ctx, &error_tk, "%s", to_char_cp(msg));
+}
+
+static void do_warning(cpp_context *ctx, cpp_token *tk)
+{
+    uchar buf[4096] = {0};
+    cpp_token warning_tk = *tk;
+    uint mark = ctx->buf.len;
+    const uchar *msg = cpp_buffer_append(&ctx->buf, to_uchar_cp("#warning"), 8);
+
+    cpp_next(ctx, tk); /* eat "warning" */
+
+    while (tk->kind != '\n' && tk->kind != TK_eof) {
+        if (PREV_SPACE(tk))
+            cpp_buffer_append_ch(&ctx->buf, ' ');
+        uint len = cpp_token_spell(tk, buf, sizeof(buf));
+        cpp_buffer_append(&ctx->buf, buf, len);
+        cpp_next(ctx, tk);
+    }
+
+    cpp_buffer_append_ch(&ctx->buf, '\0');
+    cpp_warn(ctx, &warning_tk, "%s", to_char_cp(msg));
+    ctx->buf.len = mark;
 }
 
 /* ---- #line ------------------------------------------------------------- */
@@ -487,7 +509,7 @@ static void do_line(cpp_context *ctx, cpp_token *tk)
     tok++;
     buf[len] = 0;
 
-    val = strtoul((const char *)buf, (char **)&end, 10);
+    val = strtoul(to_char_cp(buf), (char **)&end, 10);
     if (val == 0 && errno == 0)
         cpp_error(ctx, tok, "line number cannot be zero");
     else if (val > INT_MAX)
@@ -510,9 +532,7 @@ static void do_line(cpp_context *ctx, cpp_token *tk)
 done:
     ctx->stream->pplineno_loc = tok->lineno;
     ctx->stream->pplineno_val = val;
-    ctx->stream->ppfname = (const char *)cpp_buffer_append(&ctx->file0_buf,
-                                                           fname,
-                                                           len);
+    ctx->stream->ppfname = to_char_cp(cpp_buffer_append(&ctx->file0_buf, fname, len));
 }
 
 static uint get_lineno_tok(cpp_context *ctx, const cpp_token *tk)
@@ -623,7 +643,7 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
                          const char **cwd, uint *outlen, uchar *is_sys)
 {
     uint len = 0;
-    const char *path = (const char *)buf;
+    const char *path = to_char_cp(buf);
     cpp_token *tok = expand_line(ctx, tk, 0);
 
     if (tok->kind == TK_string) {
@@ -664,7 +684,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     struct stat sb = {0};
     uchar buf[PATH_MAX + 1];
     string_ref pathref, nameref;
-    const char *cwd = NULL, *name = (const char *)buf;
+    const char *cwd = NULL, *name = to_char_cp(buf);
 
     cpp_next(ctx, tk);
     pathtk = *tk;
@@ -924,7 +944,7 @@ static cond_expr *cond_expr_number(cpp_context *ctx, cpp_token *tok,
             base = 8;
     }
 
-    val = strtoul((const char *)buf, (char **)&endp, base);
+    val = strtoul(to_char_cp(buf), (char **)&endp, base);
     if (errno != 0 && val == ULONG_MAX)
         cpp_error(ctx, tok, "integer constant too large");
 
@@ -2041,7 +2061,7 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
             /* now cache it */
             ctx->ppdate = cpp_buffer_append(&ctx->file0_buf, (uchar *)buf, len + 1);
         } else {
-            len = strlen((const char *)ctx->ppdate);
+            len = strlen(to_char_cp(ctx->ppdate));
         }
         dt = 1;
         cpp_token_set_synth(ctx, macro_tk, ctx->ppdate, len);
@@ -2057,7 +2077,7 @@ static void expand_builtin(cpp_context *ctx, string_ref name,
             /* now cache it */
             ctx->pptime = cpp_buffer_append(&ctx->file0_buf, (uchar *)buf, len + 1);
         } else {
-            len = strlen((const char *)ctx->pptime);
+            len = strlen(to_char_cp(ctx->pptime));
         }
         dt = 1;
         cpp_token_set_synth(ctx, macro_tk, ctx->pptime, len);
@@ -2199,7 +2219,7 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     stream.pplineno_val = ctx->stream->pplineno_val;
     stream.fname = ctx->stream->fname;
     stream.ppfname = ctx->stream->ppfname;
-    stream.p = cpp_buffer_append(&ctx->file0_buf, (const uchar *)buf3, n + 1);
+    stream.p = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(buf3), n + 1);
     stream.file = ctx->stream->file;
     stream.base = ctx->file0_buf.data;
     stream.cond = NULL;
@@ -2707,6 +2727,11 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
         /* #error */
         if (dkind == g_error) {
             do_error(ctx, tk);
+            continue;
+        }
+
+        if (dkind == g_warning) {
+            do_warning(ctx, tk);
             continue;
         }
 
