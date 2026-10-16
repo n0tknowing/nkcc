@@ -754,7 +754,7 @@ include_error:
     cpp_error(ctx, &pathtk, "invalid #include syntax");
 }
 
-/* --- #if stuff ---------------------------------------------------------- */
+/* --- #if and friends stuff ---------------------------------------------- */
 
 static void cond_stack_push(cpp_context *ctx, cpp_token tk)
 {
@@ -2730,6 +2730,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             continue;
         }
 
+        /* #warning (C23) */
         if (dkind == g_warning) {
             do_warning(ctx, tk);
             continue;
