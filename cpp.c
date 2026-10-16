@@ -648,7 +648,7 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
 
     if (tok->kind == TK_string) {
         len = cpp_token_spell(tok, buf, PATH_MAX);
-        buf[len - 1] = 0; path++; len -= 2;
+        buf[len - 1] = 0; path++; len -= 2; /* remove "" */
         if (cwd) *cwd = string_ref_ptr(ctx->stream->file->dirpath);
         if (is_sys) *is_sys = 0;
         tok++;
@@ -721,6 +721,10 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     if (is_sys)
         name = string_ref_ptr(pathref);
 
+    if (g_include_depth >= CPP_MAX_INCLUDE)
+        cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
+                                "of %u", g_include_depth, CPP_MAX_INCLUDE);
+
     m = hash_table_lookup(&ctx->guarded_file, pathref);
     if (m != NULL && HAS_FLAG(m->flags, CPP_MACRO_GUARD)) {
         file = cpp_file_no(m->fileno);
@@ -730,10 +734,6 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
             (uint)sb.st_ino == file->inode)
             return;
     }
-
-    if (g_include_depth >= CPP_MAX_INCLUDE)
-        cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
-                                "of %u", g_include_depth, CPP_MAX_INCLUDE);
 
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
