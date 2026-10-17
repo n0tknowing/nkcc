@@ -353,8 +353,8 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
     if (unlikely(s == NULL))
         return;
 
-    tk->flags = s->flags;
-    s->flags = 0;
+    tk->flags = s->tkflags;
+    s->tkflags = 0;
     tk->fileno = s->file->no;
 
     while (*s->p) {
@@ -378,8 +378,8 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk)
         /* newline */
         if (*s->p == '\n') {
             s->p++; tk->lineno = s->lineno++;
-            s->flags = tk->flags | CPP_TOKEN_BOL;
-            s->flags &= ~CPP_TOKEN_SPACE; tk->kind = '\n';
+            s->tkflags = tk->flags | CPP_TOKEN_BOL;
+            s->tkflags &= ~CPP_TOKEN_SPACE; tk->kind = '\n';
             tk->p.src.offset = 0; tk->p.src.length = 0;
             return;
         }

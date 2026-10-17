@@ -322,7 +322,6 @@ typedef struct cpp_buffer {
 } cpp_buffer;
 
 typedef struct cpp_stream {
-    uchar flags;
     uint lineno;
     uint pplineno_loc;
     uint pplineno_val;
@@ -333,6 +332,7 @@ typedef struct cpp_stream {
     cpp_file *file;
     cond_stack *cond;
     struct cpp_stream *prev; /* #include may modify this */
+    uchar tkflags;
 } cpp_stream;
 
 /*

@@ -317,7 +317,7 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
 
     cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
-    g_stream_tmp.flags = 0;
+    g_stream_tmp.tkflags = 0;
     g_stream_tmp.lineno = 1;
     g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
     g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
@@ -341,7 +341,7 @@ void cpp_macro_undefine(cpp_context *ctx, const char *in)
     sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), strlen(in));
     cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
-    g_stream_tmp.flags = 0;
+    g_stream_tmp.tkflags = 0;
     g_stream_tmp.lineno = 1;
     g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
     g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
@@ -551,7 +551,7 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     cpp_stream *s = malloc(sizeof(cpp_stream));
     assert(s);
 
-    s->flags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
+    s->tkflags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
     s->pplineno_loc = s->pplineno_val = 0;
     s->lineno = 1;
     s->p = file->data;
@@ -2184,8 +2184,8 @@ static void stringize(cpp_context *ctx,
     cpp_buffer_append_ch(&ctx->file0_buf, '"');
 
     cpp_stream stream; /* fake stream */
-    stream.flags = arg_tk->flags & CPP_TOKEN_SPACE;
-    stream.flags |= CPP_TOKEN_SYNTH;
+    stream.tkflags = arg_tk->flags & CPP_TOKEN_SPACE;
+    stream.tkflags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
     stream.pplineno_loc = ctx->stream->pplineno_loc;
     stream.pplineno_val = ctx->stream->pplineno_val;
@@ -2215,8 +2215,8 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     int n = snprintf(buf3, sizeof(buf3) - 1, "%.*s%.*s", len, buf, len2, buf2);
 
     cpp_stream stream; /* fake stream */
-    stream.flags = lhs->flags & CPP_TOKEN_SPACE;
-    stream.flags |= CPP_TOKEN_SYNTH;
+    stream.tkflags = lhs->flags & CPP_TOKEN_SPACE;
+    stream.tkflags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
     stream.pplineno_loc = ctx->stream->pplineno_loc;
     stream.pplineno_val = ctx->stream->pplineno_val;
