@@ -375,6 +375,8 @@ void cpp_buffer_cleanup(cpp_buffer *buf);
 void cpp_buffer_clear(cpp_buffer *buf);
 const uchar *cpp_buffer_append(cpp_buffer *buf, const uchar *p, uint psize);
 const uchar *cpp_buffer_append_ch(cpp_buffer *buf, uchar ch);
+uint cpp_buffer_push_mark(cpp_buffer *buf);
+void cpp_buffer_pop_mark(cpp_buffer *buf, uint mark);
 
 /* cpp.c */
 void cpp_context_setup(cpp_context *ctx);
