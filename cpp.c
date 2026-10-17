@@ -464,7 +464,7 @@ static void do_warning(cpp_context *ctx, cpp_token *tk)
 {
     uchar buf[4096] = {0};
     cpp_token warning_tk = *tk;
-    uint mark = ctx->buf.len;
+    uint mark = cpp_buffer_push_mark(&ctx->buf);
     const uchar *msg = cpp_buffer_append(&ctx->buf, to_uchar_cp("#warning"), 8);
 
     cpp_next(ctx, tk); /* eat "warning" */
@@ -479,7 +479,7 @@ static void do_warning(cpp_context *ctx, cpp_token *tk)
 
     cpp_buffer_append_ch(&ctx->buf, '\0');
     cpp_warn(ctx, &warning_tk, "%s", to_char_cp(msg));
-    ctx->buf.len = mark;
+    cpp_buffer_pop_mark(&ctx->buf, mark);
 }
 
 /* ---- #line ------------------------------------------------------------- */
@@ -2206,7 +2206,7 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
                   const cpp_token *restrict rhs,
                   const cpp_token *restrict macro_tk)
 {
-    uint mark = ctx->file0_buf.len;
+    uint mark = cpp_buffer_push_mark(&ctx->file0_buf);
     char buf[4096], buf2[4096], buf3[8192 + 1] = {0};
 
     cpp_token *lhs = &os->tokens[os->n - 1];
@@ -2234,7 +2234,7 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     if (tmp.kind == TK_eof) {
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
     } else if (tmp.kind == TK_identifier) {
-        ctx->file0_buf.len = mark;
+        cpp_buffer_pop_mark(&ctx->file0_buf, mark);
         tmp.flags &= ~CPP_TOKEN_SYNTH;
     }
 
