@@ -86,3 +86,12 @@ const uchar *cpp_buffer_append(cpp_buffer *buf, const uchar *p, uint psize)
     return r;
 }
 
+uint cpp_buffer_push_mark(cpp_buffer *buf)
+{
+    return buf->len;
+}
+
+void cpp_buffer_pop_mark(cpp_buffer *buf, uint mark)
+{
+    buf->len = mark;
+}

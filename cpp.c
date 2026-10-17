@@ -317,7 +317,7 @@ void cpp_macro_define(cpp_context *ctx, const char *in)
 
     cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
-    g_stream_tmp.flags = 0;
+    g_stream_tmp.tkflags = 0;
     g_stream_tmp.lineno = 1;
     g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
     g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
@@ -341,7 +341,7 @@ void cpp_macro_undefine(cpp_context *ctx, const char *in)
     sp = cpp_buffer_append(&ctx->file0_buf, to_uchar_cp(in), strlen(in));
     cpp_buffer_append(&ctx->file0_buf, to_uchar_cp("\n\0"), 2);
 
-    g_stream_tmp.flags = 0;
+    g_stream_tmp.tkflags = 0;
     g_stream_tmp.lineno = 1;
     g_stream_tmp.pplineno_loc = g_stream_tmp.pplineno_val = 0;
     g_stream_tmp.fname = g_stream_tmp.ppfname = string_ref_ptr(f->name);
@@ -464,7 +464,7 @@ static void do_warning(cpp_context *ctx, cpp_token *tk)
 {
     uchar buf[4096] = {0};
     cpp_token warning_tk = *tk;
-    uint mark = ctx->buf.len;
+    uint mark = cpp_buffer_push_mark(&ctx->buf);
     const uchar *msg = cpp_buffer_append(&ctx->buf, to_uchar_cp("#warning"), 8);
 
     cpp_next(ctx, tk); /* eat "warning" */
@@ -479,7 +479,7 @@ static void do_warning(cpp_context *ctx, cpp_token *tk)
 
     cpp_buffer_append_ch(&ctx->buf, '\0');
     cpp_warn(ctx, &warning_tk, "%s", to_char_cp(msg));
-    ctx->buf.len = mark;
+    cpp_buffer_pop_mark(&ctx->buf, mark);
 }
 
 /* ---- #line ------------------------------------------------------------- */
@@ -551,7 +551,7 @@ static void cpp_stream_push(cpp_context *ctx, cpp_file *file)
     cpp_stream *s = malloc(sizeof(cpp_stream));
     assert(s);
 
-    s->flags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
+    s->tkflags = CPP_TOKEN_BOL | CPP_TOKEN_BOF;
     s->pplineno_loc = s->pplineno_val = 0;
     s->lineno = 1;
     s->p = file->data;
@@ -577,19 +577,23 @@ static void cpp_stream_pop(cpp_context *ctx)
     }
 }
 
-/* Merge tokens into `buf` until `end_kind` */
-static uint join_tokens(cpp_token *tk, cpp_token **end, uchar end_kind,
-                        uchar *buf, uint bufsz)
+/*
+ * Merge tokens into `buf` until `>` or EOF.
+ * It would be nice if we can count the number of whitespace.
+ */
+static uint
+glue_bracket_header_name(cpp_token *tk, cpp_token **end,
+                         uchar *buf, uint bufsz)
 {
     uint len, off = 0;
 
     while (off < bufsz) {
         if (PREV_SPACE(tk))
             buf[off++] = ' ';
+        if (tk->kind == TK_eof || tk->kind == '>')
+            break;
         len = cpp_token_spell(tk, buf + off, MIN(bufsz - off, bufsz));
         off += len; tk++;
-        if (tk->kind == TK_eof || tk->kind == end_kind)
-            break;
     }
 
     *end = tk;
@@ -638,88 +642,122 @@ done:
     return pathref;
 }
 
-static const char *
-resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
-                         const char **cwd, uint *outlen, uchar *is_sys)
+/*
+ * This may look similar to parse_include_name() but it's intentional
+ * design since we want to avoid adding complicated lexer state that
+ * needs to coordinate with the preprocessor when parsing #include name.
+ */
+static const uchar *
+resolve_computed_include(cpp_context *ctx, cpp_token *tk,
+                         uchar *restrict is_bracket, uchar *restrict buf,
+                         uint bufsz)
 {
-    uint len = 0;
-    const char *path = to_char_cp(buf);
+    const uchar *r = NULL;
     cpp_token *tok = expand_line(ctx, tk, 0);
 
     if (tok->kind == TK_string) {
-        len = cpp_token_spell(tok, buf, PATH_MAX);
-        buf[len - 1] = 0; path++; len -= 2;
-        if (cwd) *cwd = string_ref_ptr(ctx->stream->file->dirpath);
-        if (is_sys) *is_sys = 0;
+        uint n = cpp_token_spell(tok, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove closing '"' */
+        r = buf + 1; /* remove opening '"' */
         tok++;
+        *is_bracket = 0;
     } else if (tok->kind == '<') {
         tok++;
-        len = join_tokens(tok, &tok, '>', buf, PATH_MAX);
-        buf[len] = 0;
-        if (cwd) *cwd = NULL;
-        if (is_sys) *is_sys = 1;
-        tok++;
+        uint n = glue_bracket_header_name(tok, &tok, buf, bufsz);
+        buf[n] = '\0';
+        r = buf;
+        uchar seen_bracket = 0;
+        if (tok->kind == '>') {
+            tok++;
+            seen_bracket = 1;
+        }
+        if (tok->kind == TK_eof && !seen_bracket)
+            cpp_error(ctx, tok, "missing terminating > character for #include");
+        *is_bracket = 1;
     } else {
-        buf[0] = 0;
-        path = NULL;
+        *buf = '\0';
+        *is_bracket = 0;
     }
 
-    if (path != NULL && tok->kind != TK_eof) {
-        len = 0;
-        buf[0] = 0;
-        path = NULL;
+    if (r && tok->kind != TK_eof)
+        cpp_warn(ctx, tok, "extra tokens after #include");
+
+    return r;
+}
+
+static const uchar *
+parse_include_name(cpp_context *ctx, cpp_token *tk, uchar *restrict is_bracket,
+                   uchar *restrict buf, uint bufsz)
+{
+    const uchar *r = NULL;
+
+    if (tk->kind == TK_string) {
+        uint n = cpp_token_spell(tk, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove closing '"' */
+        r = buf + 1; /* remove opening '"' */
+        cpp_next(ctx, tk);
+        *is_bracket = 0;
+    } else if (tk->kind == '<') {
+        cpp_lex_string(ctx->stream, tk, '>');
+        uint n = cpp_token_spell(tk, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove '>' */
+        r = buf;
+        cpp_next(ctx, tk);
+        *is_bracket = 1;
+    } else if (tk->kind == TK_identifier) {
+        r = resolve_computed_include(ctx, tk, is_bracket, buf, bufsz);
+    } else {
+        *is_bracket = 0;
     }
 
-    if (outlen) *outlen = len;
-    return path;
+    if (!r && buf != NULL)
+        *buf = '\0';
+
+    return r;
 }
 
 static void do_include(cpp_context *ctx, cpp_token *tk)
 {
-    uint len;
     cpp_macro *m;
     cpp_file *file;
     cpp_token pathtk;
-    uchar is_sys = 0;
     struct stat sb = {0};
-    uchar buf[PATH_MAX + 1];
+    const char *cwd = NULL;
+    uchar buf[PATH_MAX + 1] = {0};
+    uchar bracket_include = 0;
     string_ref pathref, nameref;
-    const char *cwd = NULL, *name = to_char_cp(buf);
 
-    cpp_next(ctx, tk);
+    cpp_next(ctx, tk); /* eat 'include' */
+
     pathtk = *tk;
+    const uchar *name
+        = parse_include_name(ctx, tk, &bracket_include, buf, PATH_MAX);
 
-    if (tk->kind == TK_string) {
-        len = cpp_token_spell(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; name++; len -= 2; /* remove "" */
-        cwd = string_ref_ptr(ctx->stream->file->dirpath);
-        cpp_next(ctx, tk);
-    } else if (tk->kind == '<') {
-        cpp_lex_string(ctx->stream, tk, '>');
-        len = cpp_token_spell(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; len--; /* remove > */
-        cpp_next(ctx, tk);
-        is_sys = 1;
-    } else {
-        if (tk->kind != TK_identifier)
-            goto include_error;
-        name = resolve_computed_include(ctx, tk, buf, &cwd, &len, &is_sys);
-        if (name == NULL)
-            goto include_error;
+    if (name == NULL)
+        cpp_error(ctx, &pathtk, "#include expects \"FILENAME\" or <FILENAME>");
+    else if (name[0] == '\0')
+        cpp_error(ctx, &pathtk, "empty filename in #include");
+
+    if (tk->kind != '\n') {
+        cpp_warn(ctx, &pathtk, "extra tokens after #include");
+        skip_line(ctx, tk);
     }
 
-    if (tk->kind != '\n')
-        cpp_error(ctx, &pathtk, "stray token after #include");
-    else if (len == 0)
-        cpp_error(ctx, &pathtk, "empty filename");
+    if (!bracket_include)
+        cwd = string_ref_ptr(ctx->stream->file->dirpath);
 
-    pathref = search_include_path(name, cwd, &sb);
+    pathref = search_include_path(to_char_cp(name), cwd, &sb);
     if (pathref == 0)
-        cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
+        cpp_error(ctx, &pathtk, "unable to open '%s': %s",
+                  name,
                   strerror(errno));
 
-    if (is_sys)
-        name = string_ref_ptr(pathref);
+    if (bracket_include)
+        name = to_uchar_cp(string_ref_ptr(pathref));
+
+    if (g_include_depth >= CPP_MAX_INCLUDE)
+        cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
+                                "of %u", g_include_depth, CPP_MAX_INCLUDE);
 
     m = hash_table_lookup(&ctx->guarded_file, pathref);
     if (m != NULL && HAS_FLAG(m->flags, CPP_MACRO_GUARD)) {
@@ -731,16 +769,13 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
             return;
     }
 
-    if (g_include_depth >= CPP_MAX_INCLUDE)
-        cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
-                                "of %u", g_include_depth, CPP_MAX_INCLUDE);
-
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
-        nameref = string_ref_new(name);
+        nameref = string_ref_new(to_char_cp(name));
         file = cpp_file_open2(pathref, nameref, &sb);
         if (file == NULL)
-            cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
+            cpp_error(ctx, &pathtk, "unable to open '%s': %s",
+                      name,
                       strerror(errno));
         /* cache right away, not at EOF: a file that includes itself never
          * reaches EOF and every level would otherwise re-read it */
@@ -748,13 +783,9 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     }
 
     cpp_stream_push(ctx, file);
-    return;
-
-include_error:
-    cpp_error(ctx, &pathtk, "invalid #include syntax");
 }
 
-/* --- #if stuff ---------------------------------------------------------- */
+/* --- #if and friends stuff ---------------------------------------------- */
 
 static void cond_stack_push(cpp_context *ctx, cpp_token tk)
 {
@@ -1474,8 +1505,8 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
         cpp_error(ctx, tk, "no macro name given in #ifndef");
 
     name = tk->p.ref;
-    included = (name == g_defined) ||
-               (hash_table_lookup(&ctx->macro, name) == NULL);
+    included = (name != g_defined) &&
+               (hash_table_lookup(&ctx->macro, name) != NULL);
     cond_stack_push(ctx, ifndeftk);
 
     cpp_next(ctx, tk);
@@ -1484,7 +1515,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
 
     ctx->stream->cond->ctx = COND_IFNDEF;
 
-    if (!included) {
+    if (included) {
         ctx->stream->cond->flags |= CPP_COND_SKIP;
         cpp_next(ctx, tk);
         cond_stack_skip(ctx, tk);
@@ -1539,9 +1570,10 @@ static void do_elif(cpp_context *ctx, cpp_token *tk)
     ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        /* This branch has been taken, skip it. */
         cond_stack_skip(ctx, tk);
         return;
-    }
+    } /* Otherwise #elif may take this branch. */
 
     cpp_next(ctx, tk);
 
@@ -1550,6 +1582,7 @@ static void do_elif(cpp_context *ctx, cpp_token *tk)
         cpp_next(ctx, tk);
         cond_stack_skip(ctx, tk);
     } else {
+        /* Take this branch. */
         ctx->stream->cond->token = eliftk;
         ctx->stream->cond->ctx = COND_ELIF;
         ctx->stream->cond->flags &= ~CPP_COND_SKIP;
@@ -1570,9 +1603,10 @@ static void do_else(cpp_context *ctx, cpp_token *tk)
     ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        /* This branch has been taken, skip it. */
         cond_stack_skip(ctx, tk);
         return;
-    }
+    } /* Otherwise #else takes it. */
 
     ctx->stream->cond->token = elsetk;
     ctx->stream->cond->ctx = COND_ELSE;
@@ -2181,8 +2215,8 @@ static void stringize(cpp_context *ctx,
     cpp_buffer_append_ch(&ctx->file0_buf, '"');
 
     cpp_stream stream; /* fake stream */
-    stream.flags = arg_tk->flags & CPP_TOKEN_SPACE;
-    stream.flags |= CPP_TOKEN_SYNTH;
+    stream.tkflags = arg_tk->flags & CPP_TOKEN_SPACE;
+    stream.tkflags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
     stream.pplineno_loc = ctx->stream->pplineno_loc;
     stream.pplineno_val = ctx->stream->pplineno_val;
@@ -2203,7 +2237,7 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
                   const cpp_token *restrict rhs,
                   const cpp_token *restrict macro_tk)
 {
-    uint mark = ctx->file0_buf.len;
+    uint mark = cpp_buffer_push_mark(&ctx->file0_buf);
     char buf[4096], buf2[4096], buf3[8192 + 1] = {0};
 
     cpp_token *lhs = &os->tokens[os->n - 1];
@@ -2212,8 +2246,8 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     int n = snprintf(buf3, sizeof(buf3) - 1, "%.*s%.*s", len, buf, len2, buf2);
 
     cpp_stream stream; /* fake stream */
-    stream.flags = lhs->flags & CPP_TOKEN_SPACE;
-    stream.flags |= CPP_TOKEN_SYNTH;
+    stream.tkflags = lhs->flags & CPP_TOKEN_SPACE;
+    stream.tkflags |= CPP_TOKEN_SYNTH;
     stream.lineno = ctx->stream->lineno;
     stream.pplineno_loc = ctx->stream->pplineno_loc;
     stream.pplineno_val = ctx->stream->pplineno_val;
@@ -2231,7 +2265,7 @@ static void paste(cpp_context *ctx, cpp_token_array *os,
     if (tmp.kind == TK_eof) {
         cpp_error(ctx, macro_tk, "## produced invalid pp-token '%s'", buf3);
     } else if (tmp.kind == TK_identifier) {
-        ctx->file0_buf.len = mark;
+        cpp_buffer_pop_mark(&ctx->file0_buf, mark);
         tmp.flags &= ~CPP_TOKEN_SYNTH;
     }
 
@@ -2730,6 +2764,7 @@ static void cpp_preprocess(cpp_context *ctx, cpp_token *tk)
             continue;
         }
 
+        /* #warning (C23) */
         if (dkind == g_warning) {
             do_warning(ctx, tk);
             continue;

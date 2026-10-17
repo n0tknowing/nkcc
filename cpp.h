@@ -262,8 +262,7 @@ typedef struct cond_stack {
     enum {
         COND_IF, COND_IFDEF, COND_IFNDEF,
         COND_ELIF,
-        COND_ELSE,
-        COND_SKIP
+        COND_ELSE
     } ctx;
     cpp_token token; /* for diagnostic */
     struct cond_stack *prev; /* nested */
@@ -323,7 +322,6 @@ typedef struct cpp_buffer {
 } cpp_buffer;
 
 typedef struct cpp_stream {
-    uchar flags;
     uint lineno;
     uint pplineno_loc;
     uint pplineno_val;
@@ -334,6 +332,7 @@ typedef struct cpp_stream {
     cpp_file *file;
     cond_stack *cond;
     struct cpp_stream *prev; /* #include may modify this */
+    uchar tkflags;
 } cpp_stream;
 
 /*
@@ -376,6 +375,8 @@ void cpp_buffer_cleanup(cpp_buffer *buf);
 void cpp_buffer_clear(cpp_buffer *buf);
 const uchar *cpp_buffer_append(cpp_buffer *buf, const uchar *p, uint psize);
 const uchar *cpp_buffer_append_ch(cpp_buffer *buf, uchar ch);
+uint cpp_buffer_push_mark(cpp_buffer *buf);
+void cpp_buffer_pop_mark(cpp_buffer *buf, uint mark);
 
 /* cpp.c */
 void cpp_context_setup(cpp_context *ctx);
