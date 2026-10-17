@@ -1474,8 +1474,8 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
         cpp_error(ctx, tk, "no macro name given in #ifndef");
 
     name = tk->p.ref;
-    included = (name == g_defined) ||
-               (hash_table_lookup(&ctx->macro, name) == NULL);
+    included = (name != g_defined) &&
+               (hash_table_lookup(&ctx->macro, name) != NULL);
     cond_stack_push(ctx, ifndeftk);
 
     cpp_next(ctx, tk);
@@ -1484,7 +1484,7 @@ static void do_ifndef(cpp_context *ctx, cpp_token *tk, cpp_token hash)
 
     ctx->stream->cond->ctx = COND_IFNDEF;
 
-    if (!included) {
+    if (included) {
         ctx->stream->cond->flags |= CPP_COND_SKIP;
         cpp_next(ctx, tk);
         cond_stack_skip(ctx, tk);
@@ -1539,9 +1539,10 @@ static void do_elif(cpp_context *ctx, cpp_token *tk)
     ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        /* This branch has been taken, skip it. */
         cond_stack_skip(ctx, tk);
         return;
-    }
+    } /* Otherwise #elif may take this branch. */
 
     cpp_next(ctx, tk);
 
@@ -1550,6 +1551,7 @@ static void do_elif(cpp_context *ctx, cpp_token *tk)
         cpp_next(ctx, tk);
         cond_stack_skip(ctx, tk);
     } else {
+        /* Take this branch. */
         ctx->stream->cond->token = eliftk;
         ctx->stream->cond->ctx = COND_ELIF;
         ctx->stream->cond->flags &= ~CPP_COND_SKIP;
@@ -1570,9 +1572,10 @@ static void do_else(cpp_context *ctx, cpp_token *tk)
     ctx->stream->cond->flags &= ~CPP_COND_GUARD;
 
     if (!HAS_FLAG(ctx->stream->cond->flags, CPP_COND_SKIP)) {
+        /* This branch has been taken, skip it. */
         cond_stack_skip(ctx, tk);
         return;
-    }
+    } /* Otherwise #else takes it. */
 
     ctx->stream->cond->token = elsetk;
     ctx->stream->cond->ctx = COND_ELSE;

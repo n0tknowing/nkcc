@@ -262,8 +262,7 @@ typedef struct cond_stack {
     enum {
         COND_IF, COND_IFDEF, COND_IFNDEF,
         COND_ELIF,
-        COND_ELSE,
-        COND_SKIP
+        COND_ELSE
     } ctx;
     cpp_token token; /* for diagnostic */
     struct cond_stack *prev; /* nested */
