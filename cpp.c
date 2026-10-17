@@ -582,20 +582,18 @@ static void cpp_stream_pop(cpp_context *ctx)
  * It would be nice if we can count the number of whitespace.
  */
 static uint
-glue_bracket_header_name(cpp_token *tk, cpp_token **end, uchar *buf, uint bufsz)
+glue_bracket_header_name(cpp_token *tk, cpp_token **end,
+                         uchar *buf, uint bufsz)
 {
     uint len, off = 0;
 
     while (off < bufsz) {
         if (PREV_SPACE(tk))
             buf[off++] = ' ';
+        if (tk->kind == TK_eof || tk->kind == '>')
+            break;
         len = cpp_token_spell(tk, buf + off, MIN(bufsz - off, bufsz));
         off += len; tk++;
-        if (tk->kind == TK_eof || tk->kind == '>') {
-            if ((tk->kind == '>') && (PREV_SPACE(tk)) && ((off+1) < bufsz))
-                buf[off++] = ' ';
-            break;
-        }
     }
 
     *end = tk;
@@ -644,94 +642,118 @@ done:
     return pathref;
 }
 
-static const char *
-resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
-                         const char **cwd, uint *outlen, uchar *bracket_include)
+/*
+ * This may look similar to parse_include_name() but it's intentional
+ * design since we want to avoid adding complicated lexer state that
+ * needs to coordinate with the preprocessor when parsing #include name.
+ */
+static const uchar *
+resolve_computed_include(cpp_context *ctx, cpp_token *tk,
+                         uchar *restrict is_bracket, uchar *restrict buf,
+                         uint bufsz)
 {
-    uint len = 0;
-    const char *path = to_char_cp(buf);
+    const uchar *r = NULL;
     cpp_token *tok = expand_line(ctx, tk, 0);
 
     if (tok->kind == TK_string) {
-        len = cpp_token_spell(tok, buf, PATH_MAX);
-        buf[len - 1] = 0; path++; len -= 2; /* remove "" */
-        if (cwd) *cwd = string_ref_ptr(ctx->stream->file->dirpath);
-        *bracket_include = 0;
+        uint n = cpp_token_spell(tok, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove closing '"' */
+        r = buf + 1; /* remove opening '"' */
         tok++;
+        *is_bracket = 0;
     } else if (tok->kind == '<') {
         tok++;
-        len = glue_bracket_header_name(tok, &tok, buf, PATH_MAX);
-        buf[len] = 0;
-        if (cwd) *cwd = NULL;
-        *bracket_include = 1;
-        tok++;
+        uint n = glue_bracket_header_name(tok, &tok, buf, bufsz);
+        buf[n] = '\0';
+        r = buf;
+        uchar seen_bracket = 0;
+        if (tok->kind == '>') {
+            tok++;
+            seen_bracket = 1;
+        }
+        if (tok->kind == TK_eof && !seen_bracket)
+            cpp_error(ctx, tok, "missing terminating > character for #include");
+        *is_bracket = 1;
     } else {
-        buf[0] = 0;
-        path = NULL;
-        *bracket_include = 0;
+        *buf = '\0';
+        *is_bracket = 0;
     }
 
-    if (path != NULL && tok->kind != TK_eof) {
-        len = 0;
-        buf[0] = 0;
-        path = NULL;
+    if (r && tok->kind != TK_eof)
+        cpp_warn(ctx, tok, "extra tokens after #include");
+
+    return r;
+}
+
+static const uchar *
+parse_include_name(cpp_context *ctx, cpp_token *tk, uchar *restrict is_bracket,
+                   uchar *restrict buf, uint bufsz)
+{
+    const uchar *r = NULL;
+
+    if (tk->kind == TK_string) {
+        uint n = cpp_token_spell(tk, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove closing '"' */
+        r = buf + 1; /* remove opening '"' */
+        cpp_next(ctx, tk);
+        *is_bracket = 0;
+    } else if (tk->kind == '<') {
+        cpp_lex_string(ctx->stream, tk, '>');
+        uint n = cpp_token_spell(tk, buf, bufsz);
+        buf[n - 1] = '\0'; /* remove '>' */
+        r = buf;
+        cpp_next(ctx, tk);
+        *is_bracket = 1;
+    } else if (tk->kind == TK_identifier) {
+        r = resolve_computed_include(ctx, tk, is_bracket, buf, bufsz);
+    } else {
+        *is_bracket = 0;
     }
 
-    if (outlen) *outlen = len;
-    return path;
+    if (!r && buf != NULL)
+        *buf = '\0';
+
+    return r;
 }
 
 static void do_include(cpp_context *ctx, cpp_token *tk)
 {
-    uint len;
     cpp_macro *m;
     cpp_file *file;
     cpp_token pathtk;
-    uchar bracket_include = 0;
     struct stat sb = {0};
-    uchar buf[PATH_MAX + 1];
+    const char *cwd = NULL;
+    uchar buf[PATH_MAX + 1] = {0};
+    uchar bracket_include = 0;
     string_ref pathref, nameref;
-    const char *cwd = NULL, *name = to_char_cp(buf);
 
-    cpp_next(ctx, tk);
+    cpp_next(ctx, tk); /* eat 'include' */
+
     pathtk = *tk;
+    const uchar *name
+        = parse_include_name(ctx, tk, &bracket_include, buf, PATH_MAX);
 
-    if (tk->kind == TK_string) {
-        len = cpp_token_spell(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; name++; len -= 2; /* remove "" */
-        cwd = string_ref_ptr(ctx->stream->file->dirpath);
-        cpp_next(ctx, tk);
-    } else if (tk->kind == '<') {
-        cpp_lex_string(ctx->stream, tk, '>');
-        len = cpp_token_spell(tk, buf, PATH_MAX);
-        buf[len - 1] = 0; len--; /* remove > */
-        cpp_next(ctx, tk);
-        bracket_include = 1;
-    } else {
-        if (tk->kind != TK_identifier)
-            cpp_error(ctx, &pathtk, "#include expects \"FILENAME\" "
-                                    "or <FILENAME>");
-        name = resolve_computed_include(ctx, tk, buf, &cwd, &len, &bracket_include);
-        if (name == NULL)
-            cpp_error(ctx, &pathtk, "#include expects \"FILENAME\" "
-                                    "or <FILENAME>");
-    }
-
-    if (tk->kind != '\n')
-        cpp_error(ctx, &pathtk, "stray token after #include");
-    else if (len == 0)
+    if (name == NULL)
+        cpp_error(ctx, &pathtk, "#include expects \"FILENAME\" or <FILENAME>");
+    else if (name[0] == '\0')
         cpp_error(ctx, &pathtk, "empty filename in #include");
 
-    pathref = search_include_path(name, cwd, &sb);
+    if (tk->kind != '\n') {
+        cpp_warn(ctx, &pathtk, "extra tokens after #include");
+        skip_line(ctx, tk);
+    }
+
+    if (!bracket_include)
+        cwd = string_ref_ptr(ctx->stream->file->dirpath);
+
+    pathref = search_include_path(to_char_cp(name), cwd, &sb);
     if (pathref == 0)
-        cpp_error(ctx, &pathtk, "unable to open %c%s%c: %s",
-                  bracket_include ? '<' : '"',
+        cpp_error(ctx, &pathtk, "unable to open '%s': %s",
                   name,
-                  bracket_include ? '>' : '"',
                   strerror(errno));
 
     if (bracket_include)
-        name = string_ref_ptr(pathref);
+        name = to_uchar_cp(string_ref_ptr(pathref));
 
     if (g_include_depth >= CPP_MAX_INCLUDE)
         cpp_error(ctx, &pathtk, "#include nested depth %u exceeds maximum "
@@ -749,13 +771,11 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
 
     file = hash_table_lookup(&ctx->cached_file, pathref);
     if (file == NULL) {
-        nameref = string_ref_new(name);
+        nameref = string_ref_new(to_char_cp(name));
         file = cpp_file_open2(pathref, nameref, &sb);
         if (file == NULL)
-            cpp_error(ctx, &pathtk, "unable to open %c%s%c: %s",
-                      bracket_include ? '<' : '"',
+            cpp_error(ctx, &pathtk, "unable to open '%s': %s",
                       name,
-                      bracket_include ? '>' : '"',
                       strerror(errno));
         /* cache right away, not at EOF: a file that includes itself never
          * reaches EOF and every level would otherwise re-read it */
