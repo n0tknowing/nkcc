@@ -640,7 +640,7 @@ done:
 
 static const char *
 resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
-                         const char **cwd, uint *outlen, uchar *is_sys)
+                         const char **cwd, uint *outlen, uchar *bracket_include)
 {
     uint len = 0;
     const char *path = to_char_cp(buf);
@@ -650,14 +650,14 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk, uchar *buf,
         len = cpp_token_spell(tok, buf, PATH_MAX);
         buf[len - 1] = 0; path++; len -= 2; /* remove "" */
         if (cwd) *cwd = string_ref_ptr(ctx->stream->file->dirpath);
-        if (is_sys) *is_sys = 0;
+        if (bracket_include) *bracket_include = 0;
         tok++;
     } else if (tok->kind == '<') {
         tok++;
         len = join_tokens(tok, &tok, '>', buf, PATH_MAX);
         buf[len] = 0;
         if (cwd) *cwd = NULL;
-        if (is_sys) *is_sys = 1;
+        if (bracket_include) *bracket_include = 1;
         tok++;
     } else {
         buf[0] = 0;
@@ -680,7 +680,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     cpp_macro *m;
     cpp_file *file;
     cpp_token pathtk;
-    uchar is_sys = 0;
+    uchar bracket_include = 0;
     struct stat sb = {0};
     uchar buf[PATH_MAX + 1];
     string_ref pathref, nameref;
@@ -699,13 +699,15 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
         len = cpp_token_spell(tk, buf, PATH_MAX);
         buf[len - 1] = 0; len--; /* remove > */
         cpp_next(ctx, tk);
-        is_sys = 1;
+        bracket_include = 1;
     } else {
         if (tk->kind != TK_identifier)
-            goto include_error;
-        name = resolve_computed_include(ctx, tk, buf, &cwd, &len, &is_sys);
+            cpp_error(ctx, &pathtk, "#include expects \"FILENAME\""
+                                    "or <FILENAME>");
+        name = resolve_computed_include(ctx, tk, buf, &cwd, &len, &bracket_include);
         if (name == NULL)
-            goto include_error;
+            cpp_error(ctx, &pathtk, "#include expects \"FILENAME\""
+                                    "or <FILENAME>");
     }
 
     if (tk->kind != '\n')
@@ -718,7 +720,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
         cpp_error(ctx, &pathtk, "unable to open '%s': %s", name,
                   strerror(errno));
 
-    if (is_sys)
+    if (bracket_include)
         name = string_ref_ptr(pathref);
 
     if (g_include_depth >= CPP_MAX_INCLUDE)
@@ -748,10 +750,6 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
     }
 
     cpp_stream_push(ctx, file);
-    return;
-
-include_error:
-    cpp_error(ctx, &pathtk, "invalid #include syntax");
 }
 
 /* --- #if and friends stuff ---------------------------------------------- */
