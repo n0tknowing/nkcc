@@ -649,7 +649,7 @@ done:
  */
 static const uchar *
 resolve_computed_include(cpp_context *ctx, cpp_token *tk,
-                         bool *restrict is_bracket, uchar *restrict buf,
+                         bool &restrict is_bracket, uchar *restrict buf,
                          uint bufsz)
 {
     const uchar *r = NULL;
@@ -660,7 +660,7 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk,
         buf[n - 1] = '\0'; /* remove closing '"' */
         r = buf + 1; /* remove opening '"' */
         tok++;
-        *is_bracket = false;
+        is_bracket = false;
     } else if (tok->kind == '<') {
         tok++;
         uint n = glue_bracket_header_name(tok, &tok, buf, bufsz);
@@ -673,10 +673,10 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk,
         }
         if (tok->kind == TK_eof && !seen_bracket)
             cpp_error(ctx, tok, "missing terminating > character for #include");
-        *is_bracket = true;
+        is_bracket = true;
     } else {
         *buf = '\0';
-        *is_bracket = false;
+        is_bracket = false;
     }
 
     if (r && tok->kind != TK_eof)
@@ -686,7 +686,7 @@ resolve_computed_include(cpp_context *ctx, cpp_token *tk,
 }
 
 static const uchar *
-parse_include_name(cpp_context *ctx, cpp_token *tk, bool *restrict is_bracket,
+parse_include_name(cpp_context *ctx, cpp_token *tk, bool &restrict is_bracket,
                    uchar *restrict buf, uint bufsz)
 {
     const uchar *r = NULL;
@@ -696,18 +696,18 @@ parse_include_name(cpp_context *ctx, cpp_token *tk, bool *restrict is_bracket,
         buf[n - 1] = '\0'; /* remove closing '"' */
         r = buf + 1; /* remove opening '"' */
         cpp_next(ctx, tk);
-        *is_bracket = false;
+        is_bracket = false;
     } else if (tk->kind == '<') {
         cpp_lex_string(ctx->stream, tk, '>');
         uint n = cpp_token_spell(tk, buf, bufsz);
         buf[n - 1] = '\0'; /* remove '>' */
         r = buf;
         cpp_next(ctx, tk);
-        *is_bracket = true;
+        is_bracket = true;
     } else if (tk->kind == TK_identifier) {
         r = resolve_computed_include(ctx, tk, is_bracket, buf, bufsz);
     } else {
-        *is_bracket = false;
+        is_bracket = false;
     }
 
     if (!r && buf != NULL)
@@ -728,7 +728,7 @@ static void do_include(cpp_context *ctx, cpp_token *tk)
 
     cpp_token errtk = *tk;
     const uchar *name
-        = parse_include_name(ctx, tk, &bracket_include, buf, PATH_MAX);
+        = parse_include_name(ctx, tk, bracket_include, buf, PATH_MAX);
 
     if (name == NULL)
         cpp_error(ctx, &errtk, "#include expects \"FILENAME\" or <FILENAME>");
