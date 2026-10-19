@@ -25,7 +25,7 @@
 void cpp_buffer_setup(cpp_buffer *buf, uint cap)
 {
     size_t size = MIN(cap, CPP_BUFFER_MAX);
-    uchar *data = mmap(NULL,
+    uchar *data = (uchar *)mmap(NULL,
                        size,
                        PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANON,

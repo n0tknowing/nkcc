@@ -79,7 +79,7 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
             s->p++;
         }
     } else {
-        int maybe_done = 0;
+        bool maybe_done = false;
         while (*s->p) {
             skip_line_continuation(s, NULL);
             if (*s->p == '/' && maybe_done) {
@@ -88,7 +88,7 @@ static void cpp_lex_comment(cpp_stream *s, tkchar kind)
             }
             maybe_done = 0;
             if (*s->p == '\n') s->lineno++;
-            else if (*s->p == '*') maybe_done = 1;
+            else if (*s->p == '*') maybe_done = true;
             s->p++;
         }
     }
@@ -146,7 +146,8 @@ void cpp_lex_string(cpp_stream *s, cpp_token *tk, tkchar endq)
 static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
 {
     const uchar *p = s->p;
-    uchar found_digraph = 0;
+    bool found_digraph = false;
+
     tk->lineno = s->lineno;
     tk->p.src.offset = tok_offset(p, s->base);
     tk->kind = *s->p;
@@ -180,7 +181,7 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         if (*s->p == '=') {
             tk->kind = TK_asg_mod;
         } else if (*s->p == '>') {
-            found_digraph = 1;
+            found_digraph = true;
             tk->kind = '}'; /* digraph %> become } */
         } else if (*s->p == ':') {
             s->p++;
@@ -248,10 +249,10 @@ static void cpp_lex_punct(cpp_stream *s, cpp_token *tk)
         } else if (*s->p == '=') {
             tk->kind = TK_le;
         } else if (*s->p == ':') { /* digraph <: become [ */
-            found_digraph = 1;
+            found_digraph = true;
             tk->kind = '[';
         } else if (*s->p == '%') { /* digraph <% become { */
-            found_digraph = 1;
+            found_digraph = true;
             tk->kind = '{';
         }
         break;

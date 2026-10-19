@@ -84,7 +84,7 @@ cpp_file *cpp_file_open2(string_ref _path, string_ref name, struct stat *sb)
         return NULL;
 
     uint allocsize = ALIGN(filesize + 4, 8); /* 4 bytes padding */
-    uchar *data = malloc(allocsize);
+    uchar *data = (uchar *)malloc(allocsize);
     if (data == NULL) {
         close(fd);
         errno = ENOMEM;

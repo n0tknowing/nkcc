@@ -21,7 +21,6 @@
  */
 
 #include <assert.h>
-#include <stdlib.h>
 #include <string.h>
 #include "cpp.h"
 
@@ -73,24 +72,24 @@ uint cpp_token_spell(const cpp_token *tk, uchar *buf, uint bufsz)
     return i ? j : len;
 }
 
-uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
+bool cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
 {
     uint len1, len2;
     uchar buf1[4096], buf2[4096];
 
     if (tk1->kind != tk2->kind)
-        return 0;
+        return false;
 
     uchar spc1 = HAS_FLAG(tk1->flags, CPP_TOKEN_SPACE);
     uchar spc2 = HAS_FLAG(tk2->flags, CPP_TOKEN_SPACE);
 
     if (spc1 != spc2)
-        return 0;
+        return false;
 
     switch (tk1->kind) {
     case TK_identifier:
         if (tk1->p.ref != tk2->p.ref)
-            return 0;
+            return false;
         break;
     case TK_string:
     case TK_char_const:
@@ -98,13 +97,13 @@ uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2)
         len1 = cpp_token_spell(tk1, buf1, sizeof(buf1));
         len2 = cpp_token_spell(tk2, buf2, sizeof(buf2));
         if (len1 != len2 || memcmp(buf1, buf2, len1) != 0)
-            return 0;
+            return false;
         break;
     default:
         break;
     }
 
-    return 1;
+    return true;
 }
 
 void cpp_token_print(FILE *fp, const cpp_token *tk)
