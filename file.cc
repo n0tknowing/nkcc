@@ -132,8 +132,8 @@ cpp_file *cpp_file_open2(string_ref _path, string_ref name, struct stat *sb)
     file->no = g_file_count++;
     file->flags = flags;
     file->size = filesize;
-    file->inode = (uint)sb->st_ino;
-    file->devid = (uint)sb->st_dev;
+    file->inode = sb->st_ino;
+    file->devid = sb->st_dev;
     file->data = data;
     file->name = name;
     file->path = _path;

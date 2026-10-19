@@ -205,10 +205,11 @@ struct cpp_file {
     uchar flags;
     ushort no;
     uint size;
-    uint inode, devid;
     string_ref name;
     string_ref path;
     string_ref dirpath;
+    ino_t inode;
+    dev_t devid;
     uchar *data;
 };
 
