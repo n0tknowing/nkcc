@@ -121,7 +121,7 @@ static struct pool_buffer g_buffer;
 
 static void __buffer_setup(void)
 {
-    g_buffer.data = mmap(NULL,
+    g_buffer.data = (char *)mmap(NULL,
                     DEFAULT_BUFFER_SIZE,
                     PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANON,
@@ -152,7 +152,7 @@ static string_ref __buffer_new(const char *str, uint32_t __size)
 
     if (g_array.count >= g_array.capacity) {
         capacity = g_array.capacity * 2;
-        g_array.data = realloc(g_array.data, capacity * sizeof(struct string_off));
+        g_array.data = (struct string_off *)realloc(g_array.data, capacity * sizeof(struct string_off));
         err_if(g_array.data == NULL, "unable to allocate string pool: %s",
                strerror(errno));
         memset(&g_array.data[g_array.count],
@@ -196,7 +196,7 @@ static void __try_resize(void)
 
     uint32_t new_capacity = g_pool.capacity * 2;
     uint32_t mask = new_capacity - 1;
-    string_ref *new_pool = calloc(new_capacity, sizeof(string_ref));
+    string_ref *new_pool = (string_ref *)calloc(new_capacity, sizeof(string_ref));
     err_if(new_pool == NULL, "unable to allocate string pool: %s",
            strerror(errno));
 
@@ -223,13 +223,13 @@ void string_pool_setup(void)
 {
     __buffer_setup();
 
-    g_pool.data = calloc(DEFAULT_POOL_CAPA, sizeof(string_ref));
+    g_pool.data = (string_ref *)calloc(DEFAULT_POOL_CAPA, sizeof(string_ref));
     err_if(g_pool.data == NULL, "unable to allocate string pool: %s",
            strerror(errno));
     g_pool.capacity = DEFAULT_POOL_CAPA;
     g_pool.load_factor = (uint32_t)((double)(DEFAULT_POOL_CAPA * 0.80));
 
-    g_array.data = calloc(DEFAULT_ARRAY_CAPA, sizeof(struct string_off));
+    g_array.data = (struct string_off *)calloc(DEFAULT_ARRAY_CAPA, sizeof(struct string_off));
     err_if(g_array.data == NULL, "unable to allocate string pool: %s",
            strerror(errno));
     g_array.count = 1; // 0 is reserved for empty string

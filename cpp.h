@@ -23,7 +23,6 @@
 #ifndef CPP_H
 #define CPP_H
 
-#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -58,10 +57,12 @@
 # define likely(x)       (__builtin_expect(!!(x), 1))
 # define unlikely(x)     (__builtin_expect(!!(x), 0))
 # define always_inline   inline __attribute__((always_inline))
+# define restrict        __restrict__
 #else
 # define likely(x)      (x)
 # define unlikely(x)    (x)
 # define always_inline  inline
+# define restrict
 #endif
 
 #define to_uchar_p(x) ((uchar *)(x))
@@ -407,7 +408,7 @@ void cpp_lex_scan(cpp_stream *s, cpp_token *tk);
 const char *cpp_token_kind(uchar kind);
 uint cpp_token_spell(const cpp_token *tk, uchar *buf, uint bufsz);
 void cpp_token_print(FILE *fp, const cpp_token *tk);
-uchar cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
+bool cpp_token_equal(const cpp_token *tk1, const cpp_token *tk2);
 
 #define IS_I(_t) (_t->kind == TK_identifier)
 static always_inline uint cpp_token_length(const cpp_token *tk)
@@ -435,7 +436,7 @@ static always_inline const uchar *cpp_token_pointer(const cpp_token *tk)
 
 static always_inline void cpp_token_array_setup(cpp_token_array *ts, uint max)
 {
-    ts->tokens = malloc(max * sizeof(cpp_token));
+    ts->tokens = (cpp_token *)malloc(max * sizeof(cpp_token));
     assert(ts->tokens);
     ts->n = 0;
     ts->max = max;
@@ -460,7 +461,7 @@ static always_inline void cpp_token_array_append(cpp_token_array *ts,
 {
     if (ts->n >= ts->max) {
         ts->max = ts->max ? ts->max * 2 : 8;
-        ts->tokens = realloc(ts->tokens, ts->max * sizeof(cpp_token));
+        ts->tokens = (cpp_token *)realloc(ts->tokens, ts->max * sizeof(cpp_token));
         assert(ts->tokens);
     }
     ts->tokens[ts->n++] = *tk;

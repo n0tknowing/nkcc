@@ -1,25 +1,27 @@
-CC=gcc
-CFLAGS=-std=c99 -Wall -Wextra -Wvla -Wstrict-aliasing -Wstrict-prototypes -Wno-switch -fwrapv
+CXX=g++
+CXXFLAGS=-std=c++20 -Wall -Wextra -Wvla -Wstrict-aliasing -Wno-switch \
+		 -Wno-switch -fwrapv -fno-exceptions -fno-rtti
 
 BUILDDIR=build
-SRCS=buffer.c file.c string_pool.c hash_table.c cpp.c token.c lex.c main.c
-OBJS=$(addprefix $(BUILDDIR)/,$(SRCS:.c=.o))
+SRCS=buffer.cc file.cc string_pool.cc hash_table.cc cpp.cc token.cc lex.cc \
+	 main.cc
+OBJS=$(addprefix $(BUILDDIR)/,$(SRCS:.cc=.o))
 
 ifdef DEBUG
-	CFLAGS+=-g -Og
-	CFLAGS+=-DXXH_NO_INLINE_HINTS=1
+	CXXFLAGS+=-g -Og
+	CXXFLAGS+=-DXXH_NO_INLINE_HINTS=1
 ifeq ($(DEBUG),asan)
-	CFLAGS+=-fsanitize=address,undefined
+	CXXFLAGS+=-fsanitize=address,undefined
 endif
 else
-	CFLAGS+=-O2 -march=native -flto
+	CXXFLAGS+=-O2 -march=native -flto
 endif
 
 $(BUILDDIR)/nkcc: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
-$(BUILDDIR)/%.o: %.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(BUILDDIR)/%.o: %.cc | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(BUILDDIR):
 	mkdir -p $@

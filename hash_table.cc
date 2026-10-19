@@ -45,7 +45,7 @@ void hash_table_setup(ht_t *ht, unsigned int capacity)
     ht_entry_t *entries;
 
     capacity = pow2_roundup(capacity);
-    entries = calloc(capacity, sizeof(*entries));
+    entries = (ht_entry_t *)calloc(capacity, sizeof(*entries));
     assert(entries != NULL);
 
     ht->entries = entries;
@@ -95,7 +95,7 @@ static void __try_resize(ht_t *ht)
         return;
 
     capacity = ht->capacity * 2;
-    entries = calloc(capacity, sizeof(*entries));
+    entries = (ht_entry_t *)calloc(capacity, sizeof(*entries));
     assert(entries != NULL);
 
     old_entries = ht->entries;
