@@ -1194,15 +1194,15 @@ invalid_operator:
         } else {
             op = *tok;
             if (ce == NULL) {
-                len = cpp_token_spell(tok, buf, sizeof(buf));
-                cpp_error(ctx, tok, "missing value before operator '%.*s'",
+                len = cpp_token_spell(&op, buf, sizeof(buf));
+                cpp_error(ctx, &op, "missing value before operator '%.*s'",
                                     len, buf);
             }
             opr1 = ce;
             opr2 = cond_expr_parse(ctx, ++tok, end, prio);
             if (opr2 == NULL) {
-                len = cpp_token_spell(tok, buf, sizeof(buf));
-                cpp_error(ctx, tok, "missing value after operator '%.*s'",
+                len = cpp_token_spell(&op, buf, sizeof(buf));
+                cpp_error(ctx, &op, "missing value after operator '%.*s'",
                                     len, buf);
             }
             tok = *end;
