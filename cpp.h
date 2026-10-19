@@ -199,9 +199,9 @@ enum _cpp_token_kind {
 
 /* ---- structs and unions ------------------------------------------------- */
 
-typedef struct cpp_macro cpp_macro;
+struct cpp_macro;
 
-typedef struct {
+struct cpp_file {
     uchar flags;
     ushort no;
     uint size;
@@ -210,14 +210,14 @@ typedef struct {
     string_ref path;
     string_ref dirpath;
     uchar *data;
-} cpp_file;
+};
 
-typedef struct {
+struct cpp_token_span {
     uint offset;
     uint length;
-} cpp_token_span;
+};
 
-typedef struct {
+struct cpp_token {
     uchar kind;
     uchar flags;
     ushort fileno;
@@ -227,13 +227,13 @@ typedef struct {
         cpp_macro *macro; /* for TK_eom */
         cpp_token_span src; /* for the rest */
     } p;
-} cpp_token;
+};
 
-typedef struct {
+struct cpp_token_array {
     uint n;
     uint max;
     cpp_token *tokens;
-} cpp_token_array;
+};
 
 struct cpp_macro {
     uchar flags;
@@ -244,20 +244,20 @@ struct cpp_macro {
     cpp_token_array body;
 };
 
-typedef struct {
+struct cpp_macro_arg {
     uchar flags;
     string_ref param; /* associated parameter */
     cpp_token_array body; /* raw/original/unexpanded argument tokens */
     cpp_token_array expanded; /* pre-expanded argumen tokens */
-} cpp_macro_arg;
+};
 
-typedef struct {
+struct cpp_macro_args {
     uint n_arg;
     uint n_alloc; /* for freelist */
     cpp_macro_arg *arglist;
-} cpp_macro_args;
+};
 
-typedef struct cond_stack {
+struct cond_stack {
     uchar flags;
     string_ref guard_name; /* non-zero if CPP_COND_GUARD flag is set */
     enum {
@@ -267,17 +267,17 @@ typedef struct cond_stack {
     } ctx;
     cpp_token token; /* for diagnostic */
     struct cond_stack *prev; /* nested */
-} cond_stack;
+};
 
-typedef struct {
-    uchar is_unsigned;
+struct cond_expr_value {
     union {
         long s;
         ulong u;
     } v;
-} cond_expr_value;
+    bool is_unsigned;
+};
 
-typedef struct cond_expr {
+struct cond_expr {
     enum { CEXPR_UNARY, CEXPR_BINARY, CEXPR_TERNARY, CEXPR_VALUE } kind;
     union {
         struct {
@@ -296,13 +296,13 @@ typedef struct cond_expr {
         } ternary;
         cond_expr_value val;
     } v;
-} cond_expr;
+};
 
-typedef struct expansion_stream {
+struct expansion_stream {
     cpp_token_array tok; /* used during substitution */
     const cpp_token *p; /* substituted, used during rescanning from `tok` */
     struct expansion_stream *prev; /* nested */
-} expansion_stream;
+};
 
 /*
  * !!!!!!!!!! WARNING !!!!!!!!!!
@@ -312,17 +312,17 @@ typedef struct expansion_stream {
  *
  * !!!!!!!!!! WARNING !!!!!!!!!!
  */
-typedef struct generic_freelist {
+struct generic_freelist {
     struct generic_freelist *next;
-} generic_freelist;
+};
 
-typedef struct cpp_buffer {
+struct cpp_buffer {
     uchar *data;
     uint len;
     uint cap;
-} cpp_buffer;
+};
 
-typedef struct cpp_stream {
+struct cpp_stream {
     uint lineno;
     uint pplineno_loc;
     uint pplineno_val;
@@ -334,7 +334,7 @@ typedef struct cpp_stream {
     cond_stack *cond;
     struct cpp_stream *prev; /* #include may modify this */
     uchar tkflags;
-} cpp_stream;
+};
 
 /*
  * `ts` is the token array after preprocessing a file, used by later phases.
@@ -350,7 +350,7 @@ typedef struct cpp_stream {
  * `ppdate` is the cached value of __DATE__ macro.
  * `pptime` is the cached value of __TIME__ macro.
  */
-typedef struct {
+struct cpp_context {
     cpp_token_array ts;
     cpp_token_array pending;
     cpp_token_array line;
@@ -365,7 +365,7 @@ typedef struct {
     const uchar *pptime;
     uchar flags;
     /* add more... */
-} cpp_context;
+};
 
 
 /* ---- function declarations ---------------------------------------------- */

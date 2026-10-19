@@ -979,7 +979,7 @@ static cond_expr *cond_expr_number(cpp_context *ctx, cpp_token *tok,
     if (endp != NULL && *endp != '\0') {
         p = endp;
         if (*p == 'u' || *p == 'U') {
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             p++;
         }
         if (*p == 'l' || *p == 'L') {
@@ -987,7 +987,7 @@ static cond_expr *cond_expr_number(cpp_context *ctx, cpp_token *tok,
             if (*p == p[-1])
                 p++;
             if (*p == 'u' || *p == 'U') {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 p++;
             }
         }
@@ -1092,7 +1092,7 @@ multi_char:
 
     ce = cond_expr_new(ctx, *tok);
     ce->kind = cond_expr::CEXPR_VALUE;
-    ce->v.val.is_unsigned = 0;
+    ce->v.val.is_unsigned = false;
     ce->v.val.v.s = (char)val;
     *end = tok + 1;
     return ce;
@@ -1135,7 +1135,7 @@ static cond_expr *cond_expr_parse(cpp_context *ctx, cpp_token *tok,
     case TK_identifier:
         tok->kind = TK_number;
         cpp_token_set_synth(ctx, tok, cpp_buffer_append_ch(&ctx->file0_buf, '0'), 1);
-        /* fallthrough */
+        [[fallthrough]];
     case TK_number:
         if (HAS_FLAG(tok->flags, CPP_TOKEN_FLNUM))
             cpp_error(ctx, tok, "floating constant cannot be used as a value "
@@ -1262,7 +1262,7 @@ redo_no_recur:
         if (op == TK_and || op == TK_or) {
             l = cond_expr_eval2(ctx, expr->v.binary.lhs);
             v.v.u = (!l.is_unsigned && l.v.s) || l.v.u;
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (v.v.u == (op == TK_and)) {
                 r = cond_expr_eval2(ctx, expr->v.binary.rhs);
                 v.v.u = (!r.is_unsigned && r.v.s) || r.v.u;
@@ -1274,10 +1274,10 @@ redo_no_recur:
         switch (op) {
         case '*':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u * r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s * r.v.s;
             }
             break;
@@ -1285,10 +1285,10 @@ redo_no_recur:
             if ((!r.is_unsigned && l.v.s == 0) || r.v.u == 0)
                 cpp_error(ctx, &tk, "division by zero");
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u / r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s / r.v.s;
             }
             break;
@@ -1296,86 +1296,86 @@ redo_no_recur:
             if ((!r.is_unsigned && l.v.s == 0) || r.v.u == 0)
                 cpp_error(ctx, &tk, "division by zero");
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u % r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s % r.v.s;
             }
             break;
         case '+':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u + r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s + r.v.s;
             }
             break;
         case '-':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u - r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s - r.v.s;
             }
             break;
         case TK_lshift:
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u << r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s << r.v.s;
             }
             break;
         case TK_rshift:
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u >> r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s >> r.v.s;
             }
             break;
         case '<':
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u < r.v.u;
             else
                 v.v.s = l.v.s < r.v.s;
             break;
         case '>':
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u > r.v.u;
             else
                 v.v.s = l.v.s > r.v.s;
             break;
         case TK_le:
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u <= r.v.u;
             else
                 v.v.s = l.v.s <= r.v.s;
             break;
         case TK_ge:
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u >= r.v.u;
             else
                 v.v.s = l.v.s >= r.v.s;
             break;
         case TK_eq:
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u == r.v.u;
             else
                 v.v.s = l.v.s == r.v.s;
             break;
         case TK_ne:
-            v.is_unsigned = 1;
+            v.is_unsigned = true;
             if (l.is_unsigned || r.is_unsigned)
                 v.v.u = l.v.u != r.v.u;
             else
@@ -1383,28 +1383,28 @@ redo_no_recur:
             break;
         case '&':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u & r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s & r.v.s;
             }
             break;
         case '^':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u ^ r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s ^ r.v.s;
             }
             break;
         case '|':
             if (l.is_unsigned || r.is_unsigned) {
-                v.is_unsigned = 1;
+                v.is_unsigned = true;
                 v.v.u = l.v.u | r.v.u;
             } else {
-                v.is_unsigned = 0;
+                v.is_unsigned = false;
                 v.v.s = l.v.s | r.v.s;
             }
             break;
