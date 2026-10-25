@@ -2320,8 +2320,11 @@ static cpp_macro_arg *find_arg(const cpp_macro_args *args, const cpp_token *tk)
 }
 
 static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
-                  const cpp_macro_args *args, cpp_token_array *os)
+                  const cpp_macro_args *args)
 {
+    expansion_stream_push(ctx);
+
+    cpp_token_array *os = &ctx->es->tok;
     const cpp_token *is = m->body.tokens;
 
     while (is->kind != TK_eom) {
@@ -2443,6 +2446,10 @@ static void subst(cpp_context *ctx, cpp_macro *m, const cpp_token *macro_tk,
     cpp_token eom = *is;
     eom.p.macro = m;
     cpp_token_array_append(os, &eom); /* TK_eom */
+
+    ctx->es->p = ctx->es->tok.tokens;
+    ctx->es->tok.tokens[0].flags |= macro_tk->flags;
+    ctx->es->tok.tokens[0].lineno = macro_tk->lineno;
 }
 
 static bool pre_expand_ok(const cpp_macro *m, string_ref pname)
@@ -2505,19 +2512,13 @@ static bool expand(cpp_context *ctx, cpp_token *tk, bool is_expr)
                     expand_arg(ctx, arg);
             }
         }
-        expansion_stream_push(ctx);
-        subst(ctx, m, &macro_tk, &args, &ctx->es->tok);
+        subst(ctx, m, &macro_tk, &args);
         macro_args_free(&args);
     } else {
-        expansion_stream_push(ctx);
-        subst(ctx, m, &macro_tk, NULL, &ctx->es->tok);
+        subst(ctx, m, &macro_tk, NULL);
     }
 
     m->flags |= CPP_MACRO_DISABLED;
-
-    ctx->es->p = ctx->es->tok.tokens;
-    ctx->es->tok.tokens[0].flags |= macro_tk.flags;
-    ctx->es->tok.tokens[0].lineno = macro_tk.lineno;
     return true;
 }
 
