@@ -1849,7 +1849,8 @@ static cpp_macro_arg *macro_arg_new(cpp_macro_args *args, string_ref param)
     return arg;
 }
 
-static bool find_param(const string_ref *param, uint n_param, const cpp_token *tk)
+static bool
+find_param(const string_ref *param, uint n_param, const cpp_token *tk)
 {
     if (n_param == 0 || tk->kind != TK_identifier)
         return false;
@@ -1946,6 +1947,10 @@ static uint parse_macro_param(cpp_context *ctx, cpp_token *tk,
         if (tk->kind != TK_identifier) {
             free(p);
             cpp_error(ctx, tk, "expected parameter name");
+        } else if (find_param(p, n, tk)) {
+            free(p);
+            cpp_error(ctx, tk, "duplicated macro parameter '%s'",
+                                string_ref_ptr(tk->p.ref));
         }
         p[n++] = tk->p.ref;
         cpp_next(ctx, tk);
